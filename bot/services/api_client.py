@@ -117,6 +117,18 @@ class APIClient:
     async def request_digest(self, competitor_ids: list[str] | None = None) -> dict:
         return await self._request("POST", "/reports/digest", json={"competitor_ids": competitor_ids})
 
+    async def get_report(self, report_id: str) -> dict:
+        return await self._request("GET", f"/reports/{report_id}")
+
+    async def request_pdf(self, report_id: str) -> dict:
+        return await self._request("POST", "/reports/pdf", json={"report_id": report_id})
+
+    async def request_voice_report(self, report_id: str) -> dict:
+        return await self._request("POST", "/reports/voice", json={"report_id": report_id})
+
+    async def request_video_report(self, report_id: str) -> dict:
+        return await self._request("POST", "/reports/video", json={"report_id": report_id})
+
     # ── Content ──────────────────────────────────────────────────────────────
 
     async def list_plans(self) -> list[dict]:

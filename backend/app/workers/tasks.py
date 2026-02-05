@@ -320,60 +320,111 @@ async def _process_scheduled_publications_async() -> dict:
     return results
 
 
-# ── Voice Report (placeholder for Phase 5) ──────────────────────────────────
+# ── Voice Report ──────────────────────────────────────────────────────────────
 
 
 @celery_app.task(bind=True, max_retries=3)
-def generate_voice_report(self, report_id: str) -> dict:
-    """Convert a report to voice using ElevenLabs.
+def generate_voice_report(self, voice_report_id: str, source_report_id: str) -> dict:
+    """Convert a report to voice using ElevenLabs TTS.
 
-    Full implementation in Phase 5.
+    Flow: build speech script → ElevenLabs API → upload .ogg to S3 → update report.
     """
-    logger.info("Generating voice report for %s", report_id)
-    return _run_async(_generate_voice_report_async(report_id))
+    logger.info("Generating voice report %s from source %s", voice_report_id, source_report_id)
+    return _run_async(_generate_voice_report_async(voice_report_id, source_report_id))
 
 
-async def _generate_voice_report_async(report_id: str) -> dict:
+async def _generate_voice_report_async(voice_report_id: str, source_report_id: str) -> dict:
+    from app.services.media.voice_generator import VoiceGenerator
+
     async with async_session_factory() as db:
-        report = await db.get(Report, report_id)
-        if not report:
-            return {"status": "error", "message": f"Report {report_id} not found"}
+        voice_report = await db.get(Report, voice_report_id)
+        if not voice_report:
+            return {"status": "error", "message": f"Voice report {voice_report_id} not found"}
 
-        # Phase 5: ElevenLabs TTS integration
-        # 1. Extract key insights from report.content_markdown
-        # 2. Generate concise speech script
-        # 3. Call ElevenLabs API
-        # 4. Upload .ogg to S3
-        # 5. Update report.media_url
+        source_report = await db.get(Report, source_report_id)
+        if not source_report:
+            voice_report.content = {**(voice_report.content or {}), "status": "error", "error": "Source report not found"}
+            await db.commit()
+            return {"status": "error", "message": f"Source report {source_report_id} not found"}
 
-        return {"status": "pending_implementation", "report_id": report_id}
+        try:
+            generator = VoiceGenerator()
+            result = await generator.generate_voice_report(
+                report_content=source_report.content or {},
+                report_markdown=source_report.content_markdown,
+                title=source_report.title or "",
+            )
+
+            voice_report.media_url = result["url"]
+            voice_report.content = {
+                **(voice_report.content or {}),
+                "status": "completed",
+                "s3_key": result["s3_key"],
+                "duration_estimate": result["duration_estimate"],
+                "script_length": result["script_length"],
+            }
+            await db.commit()
+
+            logger.info("Voice report %s completed: %s", voice_report_id, result["s3_key"])
+            return {"status": "ok", "report_id": voice_report_id, **result}
+
+        except Exception as e:
+            voice_report.content = {**(voice_report.content or {}), "status": "error", "error": str(e)}
+            await db.commit()
+            logger.exception("Voice report %s failed", voice_report_id)
+            return {"status": "error", "report_id": voice_report_id, "message": str(e)}
 
 
-# ── Video Report (placeholder for Phase 5) ──────────────────────────────────
+# ── Video Report ──────────────────────────────────────────────────────────────
 
 
 @celery_app.task(bind=True, max_retries=3)
-def generate_video_report(self, report_id: str) -> dict:
-    """Generate a video report with HeyGen avatar.
+def generate_video_report(self, video_report_id: str, source_report_id: str) -> dict:
+    """Generate a video report with HeyGen avatar and chart overlays.
 
-    Full implementation in Phase 5.
+    Flow: render charts → HeyGen API → poll → download → S3 → update report.
     """
-    logger.info("Generating video report for %s", report_id)
-    return _run_async(_generate_video_report_async(report_id))
+    logger.info("Generating video report %s from source %s", video_report_id, source_report_id)
+    return _run_async(_generate_video_report_async(video_report_id, source_report_id))
 
 
-async def _generate_video_report_async(report_id: str) -> dict:
+async def _generate_video_report_async(video_report_id: str, source_report_id: str) -> dict:
+    from app.services.media.video_generator import VideoGenerator
+
     async with async_session_factory() as db:
-        report = await db.get(Report, report_id)
-        if not report:
-            return {"status": "error", "message": f"Report {report_id} not found"}
+        video_report = await db.get(Report, video_report_id)
+        if not video_report:
+            return {"status": "error", "message": f"Video report {video_report_id} not found"}
 
-        # Phase 5: HeyGen video generation
-        # 1. Extract data + charts from report
-        # 2. Pre-render chart images (Matplotlib/Plotly)
-        # 3. Generate avatar video via HeyGen API
-        # 4. Composite video with charts overlay
-        # 5. Upload to S3
-        # 6. Update report.media_url
+        source_report = await db.get(Report, source_report_id)
+        if not source_report:
+            video_report.content = {**(video_report.content or {}), "status": "error", "error": "Source report not found"}
+            await db.commit()
+            return {"status": "error", "message": f"Source report {source_report_id} not found"}
 
-        return {"status": "pending_implementation", "report_id": report_id}
+        try:
+            generator = VideoGenerator()
+            result = await generator.generate_video_report(
+                report_content=source_report.content or {},
+                report_markdown=source_report.content_markdown,
+                title=source_report.title or "",
+            )
+
+            video_report.media_url = result["url"]
+            video_report.content = {
+                **(video_report.content or {}),
+                "status": "completed",
+                "s3_key": result["s3_key"],
+                "heygen_video_id": result.get("heygen_video_id"),
+                "video_size": result.get("video_size"),
+            }
+            await db.commit()
+
+            logger.info("Video report %s completed: %s", video_report_id, result["s3_key"])
+            return {"status": "ok", "report_id": video_report_id, **result}
+
+        except Exception as e:
+            video_report.content = {**(video_report.content or {}), "status": "error", "error": str(e)}
+            await db.commit()
+            logger.exception("Video report %s failed", video_report_id)
+            return {"status": "error", "report_id": video_report_id, "message": str(e)}

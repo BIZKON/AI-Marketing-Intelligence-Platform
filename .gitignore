@@ -69,6 +69,6 @@ celerybeat.pid
 # Alembic
 alembic/versions/__pycache__/
 
-# Media uploads
+# Media uploads (top-level only, not service modules)
 uploads/
-media/
+/media/
