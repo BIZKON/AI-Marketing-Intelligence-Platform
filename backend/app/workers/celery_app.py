@@ -36,6 +36,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.check_daily_alerts",
         "schedule": crontab(hour=10, minute=0),  # Daily at 10:00 UTC
     },
+    "process-scheduled-publications": {
+        "task": "app.workers.tasks.process_scheduled_publications",
+        "schedule": 300.0,  # Every 5 minutes
+    },
 }
 
 celery_app.autodiscover_tasks(["app.workers"])

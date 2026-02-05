@@ -125,14 +125,55 @@ class APIClient:
     async def create_plan(self, period: str = "weekly") -> dict:
         return await self._request("POST", "/content/plans", json={"period": period})
 
-    async def list_tasks(self, task_status: str | None = None) -> list[dict]:
-        params = {}
+    async def get_plan(self, plan_id: str) -> dict:
+        return await self._request("GET", f"/content/plans/{plan_id}")
+
+    async def list_tasks(self, task_status: str | None = None, plan_id: str | None = None) -> list[dict]:
+        params: dict[str, Any] = {}
         if task_status:
             params["task_status"] = task_status
+        if plan_id:
+            params["plan_id"] = plan_id
         return await self._request("GET", "/content/tasks", params=params)
+
+    async def get_task(self, task_id: str) -> dict:
+        return await self._request("GET", f"/content/tasks/{task_id}")
+
+    async def update_task(self, task_id: str, **kwargs: Any) -> dict:
+        return await self._request("PATCH", f"/content/tasks/{task_id}", json=kwargs)
+
+    async def delete_task(self, task_id: str) -> None:
+        await self._request("DELETE", f"/content/tasks/{task_id}")
 
     async def approve_task(self, task_id: str) -> dict:
         return await self._request("POST", f"/content/tasks/{task_id}/approve")
+
+    async def reject_task(self, task_id: str) -> dict:
+        return await self._request("POST", f"/content/tasks/{task_id}/reject")
+
+    async def generate_draft(self, task_id: str) -> dict:
+        return await self._request("POST", "/content/generate", json={"task_id": task_id})
+
+    async def regenerate_draft(self, task_id: str, instructions: str = "") -> dict:
+        return await self._request("POST", "/content/regenerate", json={
+            "task_id": task_id,
+            "instructions": instructions,
+        })
+
+    async def generate_plan_drafts(self, plan_id: str) -> dict:
+        return await self._request("POST", "/content/generate-plan-drafts", json={"plan_id": plan_id})
+
+    async def publish_task(self, task_id: str, target_channel: str | None = None) -> dict:
+        body: dict[str, Any] = {"task_id": task_id}
+        if target_channel:
+            body["target_channel"] = target_channel
+        return await self._request("POST", "/content/publish", json=body)
+
+    async def schedule_task(self, task_id: str, scheduled_at: str) -> dict:
+        return await self._request("POST", "/content/schedule", json={
+            "task_id": task_id,
+            "scheduled_at": scheduled_at,
+        })
 
     # ── Usage ────────────────────────────────────────────────────────────────
 

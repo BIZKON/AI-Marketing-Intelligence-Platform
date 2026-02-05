@@ -1,10 +1,14 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
 from app.models.content_plan import PlanPeriod, PlanStatus
 from app.models.content_task import TaskStatus
+
+
+# ── Plans ────────────────────────────────────────────────────────────────────
 
 
 class ContentPlanCreate(BaseModel):
@@ -17,9 +21,14 @@ class ContentPlanResponse(BaseModel):
     title: str | None = None
     period: PlanPeriod
     status: PlanStatus
+    content: dict[str, Any] | None = None
+    ai_response: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Tasks ────────────────────────────────────────────────────────────────────
 
 
 class ContentTaskCreate(BaseModel):
@@ -27,7 +36,9 @@ class ContentTaskCreate(BaseModel):
     title: str
     body: str | None = None
     platform: str
+    content_type: str = "text"
     scheduled_at: datetime | None = None
+    metadata_json: dict[str, Any] | None = None
 
 
 class ContentTaskUpdate(BaseModel):
@@ -44,9 +55,66 @@ class ContentTaskResponse(BaseModel):
     title: str
     body: str | None = None
     platform: str
+    content_type: str = "text"
     status: TaskStatus
+    metadata_json: dict[str, Any] | None = None
     scheduled_at: datetime | None = None
     published_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Generation ───────────────────────────────────────────────────────────────
+
+
+class GenerateDraftRequest(BaseModel):
+    """Request to generate an AI draft for a specific task."""
+    task_id: uuid.UUID
+
+
+class RegenerateDraftRequest(BaseModel):
+    """Request to regenerate a draft with optional instructions."""
+    task_id: uuid.UUID
+    instructions: str = ""
+
+
+class GeneratePlanDraftsRequest(BaseModel):
+    """Generate AI drafts for all pending tasks in a plan."""
+    plan_id: uuid.UUID
+
+
+class GenerateResponse(BaseModel):
+    task_id: uuid.UUID
+    status: str
+    body_preview: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class BulkGenerateResponse(BaseModel):
+    plan_id: uuid.UUID
+    generated_count: int
+    total_pending: int
+
+
+# ── Publishing ───────────────────────────────────────────────────────────────
+
+
+class PublishRequest(BaseModel):
+    """Manual publish request for an approved task."""
+    task_id: uuid.UUID
+    target_channel: str | None = None  # Override channel/group to publish to
+
+
+class ScheduleRequest(BaseModel):
+    """Schedule a task for future auto-publishing."""
+    task_id: uuid.UUID
+    scheduled_at: datetime
+
+
+class PublishResponse(BaseModel):
+    task_id: uuid.UUID
+    status: str
+    published_url: str | None = None
+    message: str = ""

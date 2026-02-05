@@ -1,4 +1,4 @@
-"""Content management handler: plans, tasks, approvals, billing — with API integration."""
+"""Content management handler: plans, tasks, drafts, approvals, publishing, billing."""
 
 import logging
 
@@ -18,7 +18,7 @@ router = Router()
 
 @router.message(Command("plan"))
 async def cmd_plan(message: Message, api: APIClient = None, **kwargs) -> None:
-    """Generate a content plan (Creator+). Plan check is in SubscriptionMiddleware."""
+    """Generate a content plan (Creator+)."""
     if not api:
         await message.answer("Ошибка подключения. Попробуйте позже.")
         return
@@ -47,16 +47,25 @@ async def cb_create_plan(callback: CallbackQuery, api: APIClient = None, **kwarg
 
     await callback.message.answer(
         f"<b>Создаю {period} контент-план...</b>\n\n"
-        "Это может занять некоторое время."
+        "AI анализирует конкурентов и генерирует стратегию. Подождите."
     )
 
     try:
         plan = await api.create_plan(period=period)
+        plan_id = plan["id"]
+
+        builder = InlineKeyboardBuilder()
+        builder.button(text="📝 Сгенерировать драфты", callback_data=f"gendrafts_{plan_id[:8]}")
+        builder.button(text="📋 Посмотреть задачи", callback_data=f"plantasks_{plan_id[:8]}")
+        builder.adjust(1)
+
         await callback.message.answer(
             "<b>Контент-план создан!</b>\n\n"
             f"Период: {period}\n"
-            f"ID: <code>{plan['id'][:8]}...</code>\n\n"
-            "Используйте /status для просмотра задач."
+            f"ID: <code>{plan_id[:8]}...</code>\n\n"
+            "Теперь можно сгенерировать AI-драфты для всех задач плана "
+            "или посмотреть список задач.",
+            reply_markup=builder.as_markup(),
         )
     except Exception as e:
         error_text = str(e)
@@ -68,6 +77,74 @@ async def cb_create_plan(callback: CallbackQuery, api: APIClient = None, **kwarg
         else:
             logger.exception("Failed to create content plan")
             await callback.message.answer("Ошибка при создании плана. Попробуйте позже.")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("gendrafts_"))
+async def cb_generate_plan_drafts(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    """Generate AI drafts for all pending tasks in a plan."""
+    prefix = callback.data.replace("gendrafts_", "")
+
+    if not api:
+        await callback.answer("Ошибка")
+        return
+
+    await callback.message.answer("⏳ <b>Генерирую AI-драфты...</b>\nЭто может занять некоторое время.")
+
+    try:
+        # Find the plan by prefix
+        plans = await api.list_plans()
+        target_plan = next((p for p in plans if p["id"].startswith(prefix)), None)
+        if not target_plan:
+            await callback.message.answer("План не найден.")
+            await callback.answer()
+            return
+
+        result = await api.generate_plan_drafts(target_plan["id"])
+        await callback.message.answer(
+            f"<b>Драфты сгенерированы!</b>\n\n"
+            f"Создано: {result.get('generated_count', 0)} из {result.get('total_pending', 0)}\n\n"
+            "Используйте /approve для ревью и утверждения."
+        )
+    except Exception:
+        logger.exception("Failed to generate plan drafts")
+        await callback.message.answer("Ошибка при генерации драфтов.")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("plantasks_"))
+async def cb_show_plan_tasks(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    """Show tasks for a specific plan."""
+    prefix = callback.data.replace("plantasks_", "")
+
+    if not api:
+        await callback.answer("Ошибка")
+        return
+
+    try:
+        plans = await api.list_plans()
+        target_plan = next((p for p in plans if p["id"].startswith(prefix)), None)
+        if not target_plan:
+            await callback.message.answer("План не найден.")
+            await callback.answer()
+            return
+
+        tasks = await api.list_tasks(plan_id=target_plan["id"])
+        if not tasks:
+            await callback.message.answer("В плане пока нет задач.")
+            await callback.answer()
+            return
+
+        lines = [f"<b>Задачи плана ({len(tasks)}):</b>\n"]
+        for i, task in enumerate(tasks[:15], 1):
+            status_icon = STATUS_LABELS.get(task.get("status", "pending"), task.get("status", ""))
+            platform = task.get("platform", "")
+            lines.append(f"{i}. {status_icon} <b>{task['title']}</b> [{platform}]")
+
+        await callback.message.answer("\n".join(lines))
+    except Exception:
+        logger.exception("Failed to show plan tasks")
+        await callback.message.answer("Ошибка загрузки задач.")
     await callback.answer()
 
 
@@ -104,7 +181,6 @@ async def cmd_status(message: Message, api: APIClient = None, **kwargs) -> None:
         )
         return
 
-    # Group by status
     by_status: dict[str, list] = {}
     for task in tasks:
         s = task.get("status", "pending")
@@ -122,7 +198,76 @@ async def cmd_status(message: Message, api: APIClient = None, **kwargs) -> None:
             if len(group) > 3:
                 lines.append(f"  ... и ещё {len(group) - 3}")
 
-    await message.answer("\n".join(lines))
+    # Quick actions
+    builder = InlineKeyboardBuilder()
+    if by_status.get("pending"):
+        builder.button(text="📝 Сгенерировать драфты", callback_data="gen_pending")
+    if by_status.get("in_review"):
+        builder.button(text="👀 Ревью задач", callback_data="go_approve")
+    if by_status.get("approved"):
+        builder.button(text="📢 Очередь публикаций", callback_data="go_queue")
+    builder.adjust(1)
+
+    await message.answer("\n".join(lines), reply_markup=builder.as_markup() if builder.export() else None)
+
+
+@router.callback_query(lambda c: c.data == "go_approve")
+async def cb_go_approve(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    await callback.answer()
+    await cmd_approve(callback.message, api=api)
+
+
+@router.callback_query(lambda c: c.data == "go_queue")
+async def cb_go_queue(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    await callback.answer()
+    await cmd_queue(callback.message, api=api)
+
+
+# ── Draft Preview ────────────────────────────────────────────────────────────
+
+
+@router.message(Command("draft"))
+async def cmd_draft(message: Message, api: APIClient = None, **kwargs) -> None:
+    """Show drafts awaiting review with full preview."""
+    if not api:
+        await message.answer("Ошибка подключения. Попробуйте позже.")
+        return
+
+    try:
+        tasks = await api.list_tasks(task_status="in_review")
+    except Exception:
+        logger.exception("Failed to fetch draft tasks")
+        await message.answer("Не удалось загрузить драфты.")
+        return
+
+    if not tasks:
+        await message.answer(
+            "<b>Нет драфтов для просмотра.</b>\n\n"
+            "Используйте /plan → генерация драфтов для создания контента."
+        )
+        return
+
+    # Show first draft in detail
+    task = tasks[0]
+    body = task.get("body") or "(пустой драфт)"
+    body_preview = body[:800] + ("..." if len(body) > 800 else "")
+
+    builder = InlineKeyboardBuilder()
+    tid = task["id"][:8]
+    builder.button(text="✅ Утвердить", callback_data=f"approve_{tid}")
+    builder.button(text="🔄 Перегенерировать", callback_data=f"regen_{tid}")
+    builder.button(text="❌ Отклонить", callback_data=f"reject_{tid}")
+    if len(tasks) > 1:
+        builder.button(text=f"⏭ Следующий ({len(tasks) - 1} ещё)", callback_data="draft_next_0")
+    builder.adjust(2)
+
+    await message.answer(
+        f"<b>Драфт #{1}/{len(tasks)}</b>\n\n"
+        f"<b>{task['title']}</b> [{task.get('platform', '')}]\n"
+        f"Тип: {task.get('content_type', 'text')}\n\n"
+        f"<pre>{body_preview}</pre>",
+        reply_markup=builder.as_markup(),
+    )
 
 
 # ── Content Approval ─────────────────────────────────────────────────────────
@@ -153,17 +298,56 @@ async def cmd_approve(message: Message, api: APIClient = None, **kwargs) -> None
     builder = InlineKeyboardBuilder()
 
     for task in tasks[:10]:
+        body_preview = (task.get("body") or "")[:80]
         lines.append(
             f"• <b>{task['title']}</b> [{task.get('platform', '')}]\n"
-            f"  {(task.get('body') or '')[:100]}..."
+            f"  {body_preview}{'...' if len(body_preview) == 80 else ''}"
         )
-        builder.button(
-            text=f"✅ {task['title'][:25]}",
-            callback_data=f"approve_{task['id'][:8]}",
-        )
+        tid = task["id"][:8]
+        builder.button(text=f"✅ {task['title'][:25]}", callback_data=f"approve_{tid}")
+        builder.button(text=f"👁 Превью", callback_data=f"preview_{tid}")
 
-    builder.adjust(1)
+    builder.adjust(2)
     await message.answer("\n".join(lines), reply_markup=builder.as_markup())
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("preview_"))
+async def cb_preview_task(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    """Show full preview of a task's content."""
+    prefix = callback.data.replace("preview_", "")
+
+    if not api:
+        await callback.answer("Ошибка")
+        return
+
+    try:
+        tasks = await api.list_tasks()
+        target = next((t for t in tasks if t["id"].startswith(prefix)), None)
+        if not target:
+            await callback.message.answer("Задача не найдена.")
+            await callback.answer()
+            return
+
+        body = target.get("body") or "(нет контента)"
+        body_preview = body[:1500] + ("..." if len(body) > 1500 else "")
+
+        builder = InlineKeyboardBuilder()
+        tid = target["id"][:8]
+        builder.button(text="✅ Утвердить", callback_data=f"approve_{tid}")
+        builder.button(text="🔄 Перегенерировать", callback_data=f"regen_{tid}")
+        builder.button(text="❌ Отклонить", callback_data=f"reject_{tid}")
+        builder.adjust(3)
+
+        await callback.message.answer(
+            f"<b>{target['title']}</b> [{target.get('platform', '')}]\n"
+            f"Статус: {STATUS_LABELS.get(target.get('status', ''), target.get('status', ''))}\n\n"
+            f"<pre>{body_preview}</pre>",
+            reply_markup=builder.as_markup(),
+        )
+    except Exception:
+        logger.exception("Failed to preview task")
+        await callback.message.answer("Ошибка при загрузке превью.")
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("approve_"))
@@ -179,14 +363,167 @@ async def cb_approve_task(callback: CallbackQuery, api: APIClient = None, **kwar
         target = next((t for t in tasks if t["id"].startswith(prefix)), None)
         if target:
             await api.approve_task(target["id"])
+
+            builder = InlineKeyboardBuilder()
+            builder.button(text="📢 Опубликовать", callback_data=f"pub_{target['id'][:8]}")
+            builder.adjust(1)
+
             await callback.message.answer(
-                f"✅ Задача <b>{target['title']}</b> утверждена!"
+                f"✅ Задача <b>{target['title']}</b> утверждена!\n\n"
+                "Можете опубликовать сейчас или задача будет опубликована по расписанию.",
+                reply_markup=builder.as_markup(),
             )
         else:
             await callback.message.answer("Задача не найдена или уже утверждена.")
     except Exception:
         logger.exception("Failed to approve task")
         await callback.message.answer("Ошибка при утверждении задачи.")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("reject_"))
+async def cb_reject_task(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    prefix = callback.data.replace("reject_", "")
+
+    if not api:
+        await callback.answer("Ошибка")
+        return
+
+    try:
+        tasks = await api.list_tasks()
+        target = next((t for t in tasks if t["id"].startswith(prefix)), None)
+        if target:
+            await api.reject_task(target["id"])
+            await callback.message.answer(
+                f"↩️ Задача <b>{target['title']}</b> отклонена и возвращена в черновик."
+            )
+        else:
+            await callback.message.answer("Задача не найдена.")
+    except Exception:
+        logger.exception("Failed to reject task")
+        await callback.message.answer("Ошибка при отклонении задачи.")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("regen_"))
+async def cb_regenerate_draft(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    """Regenerate a draft with AI."""
+    prefix = callback.data.replace("regen_", "")
+
+    if not api:
+        await callback.answer("Ошибка")
+        return
+
+    await callback.message.answer("🔄 <b>Перегенерирую драфт...</b>")
+
+    try:
+        tasks = await api.list_tasks()
+        target = next((t for t in tasks if t["id"].startswith(prefix)), None)
+        if not target:
+            await callback.message.answer("Задача не найдена.")
+            await callback.answer()
+            return
+
+        result = await api.regenerate_draft(target["id"])
+        body_preview = result.get("body_preview", "")[:500]
+
+        builder = InlineKeyboardBuilder()
+        tid = target["id"][:8]
+        builder.button(text="✅ Утвердить", callback_data=f"approve_{tid}")
+        builder.button(text="🔄 Ещё раз", callback_data=f"regen_{tid}")
+        builder.adjust(2)
+
+        await callback.message.answer(
+            f"<b>Новый драфт для «{target['title']}»:</b>\n\n"
+            f"<pre>{body_preview}{'...' if len(body_preview) == 500 else ''}</pre>",
+            reply_markup=builder.as_markup(),
+        )
+    except Exception:
+        logger.exception("Failed to regenerate draft")
+        await callback.message.answer("Ошибка при перегенерации.")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "gen_pending")
+async def cb_generate_pending(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    """Generate drafts for all pending tasks (picks the latest plan)."""
+    if not api:
+        await callback.answer("Ошибка")
+        return
+
+    await callback.message.answer("⏳ <b>Генерирую драфты для ожидающих задач...</b>")
+
+    try:
+        tasks = await api.list_tasks(task_status="pending")
+        if not tasks:
+            await callback.message.answer("Нет ожидающих задач.")
+            await callback.answer()
+            return
+
+        generated = 0
+        for task in tasks[:10]:
+            try:
+                await api.generate_draft(task["id"])
+                generated += 1
+            except Exception:
+                logger.warning("Failed to generate draft for task %s", task["id"])
+
+        await callback.message.answer(
+            f"<b>Готово!</b> Сгенерировано {generated} из {len(tasks)} драфтов.\n\n"
+            "Используйте /approve для ревью."
+        )
+    except Exception:
+        logger.exception("Failed to generate pending drafts")
+        await callback.message.answer("Ошибка при генерации.")
+    await callback.answer()
+
+
+# ── Publishing ───────────────────────────────────────────────────────────────
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("pub_"))
+async def cb_publish_task(callback: CallbackQuery, api: APIClient = None, **kwargs) -> None:
+    """Publish an approved task immediately."""
+    prefix = callback.data.replace("pub_", "")
+
+    if not api:
+        await callback.answer("Ошибка")
+        return
+
+    try:
+        tasks = await api.list_tasks(task_status="approved")
+        target = next((t for t in tasks if t["id"].startswith(prefix)), None)
+        if not target:
+            await callback.message.answer("Задача не найдена или уже опубликована.")
+            await callback.answer()
+            return
+
+        await callback.message.answer(f"📤 Публикую <b>{target['title']}</b>...")
+
+        result = await api.publish_task(target["id"])
+        url = result.get("published_url", "")
+        msg = result.get("message", "")
+
+        if url:
+            await callback.message.answer(
+                f"📢 <b>Опубликовано!</b>\n\n"
+                f"{target['title']}\n"
+                f"Ссылка: {url}"
+            )
+        else:
+            await callback.message.answer(
+                f"📢 <b>Результат публикации:</b>\n{msg}"
+            )
+    except Exception as e:
+        error_text = str(e)
+        if "403" in error_text:
+            await callback.message.answer(
+                "Автопубликация доступна начиная с тарифа Autopilot.\n\n"
+                "Используйте /billing для апгрейда."
+            )
+        else:
+            logger.exception("Failed to publish task")
+            await callback.message.answer("Ошибка при публикации.")
     await callback.answer()
 
 
@@ -215,7 +552,9 @@ async def cmd_queue(message: Message, api: APIClient = None, **kwargs) -> None:
         return
 
     lines = ["<b>Очередь публикаций:</b>\n"]
-    for i, task in enumerate(tasks, 1):
+    builder = InlineKeyboardBuilder()
+
+    for i, task in enumerate(tasks[:10], 1):
         scheduled = task.get("scheduled_at", "не запланировано")
         if isinstance(scheduled, str) and len(scheduled) > 10:
             scheduled = scheduled[:16].replace("T", " ")
@@ -223,8 +562,13 @@ async def cmd_queue(message: Message, api: APIClient = None, **kwargs) -> None:
             f"{i}. <b>{task['title']}</b> [{task.get('platform', '')}]\n"
             f"   Запланировано: {scheduled}"
         )
+        builder.button(
+            text=f"📢 {task['title'][:20]}",
+            callback_data=f"pub_{task['id'][:8]}",
+        )
 
-    await message.answer("\n".join(lines))
+    builder.adjust(1)
+    await message.answer("\n".join(lines), reply_markup=builder.as_markup())
 
 
 # ── Billing ──────────────────────────────────────────────────────────────────

@@ -254,6 +254,72 @@ async def _generate_content_plan_async(user_id: str, period: str) -> dict:
         }
 
 
+# ── Auto-Publishing ──────────────────────────────────────────────────────────
+
+
+@celery_app.task(bind=True, max_retries=3)
+def process_scheduled_publications(self) -> dict:
+    """Publish all approved tasks that have passed their scheduled_at time.
+
+    Runs every 5 minutes via Celery Beat.
+    """
+    logger.info("Processing scheduled publications")
+    return _run_async(_process_scheduled_publications_async())
+
+
+async def _process_scheduled_publications_async() -> dict:
+    results = {"published": 0, "failed": 0, "errors": []}
+
+    async with async_session_factory() as db:
+        now = datetime.now(timezone.utc)
+
+        # Find tasks that are approved, scheduled, and past their scheduled time
+        stmt = select(ContentTask).where(
+            ContentTask.status == "approved",
+            ContentTask.scheduled_at.isnot(None),
+            ContentTask.scheduled_at <= now,
+        )
+        tasks = (await db.execute(stmt)).scalars().all()
+
+        if not tasks:
+            return results
+
+        from app.services.publisher import PublisherService
+        publisher = PublisherService()
+
+        for task in tasks:
+            try:
+                pub_result = await publisher.publish(task)
+
+                if pub_result.get("status") == "ok":
+                    task.status = "published"
+                    task.published_at = now
+                    task.metadata_json = {
+                        **(task.metadata_json or {}),
+                        "published_url": pub_result.get("url"),
+                        "auto_published": True,
+                    }
+                    results["published"] += 1
+                    logger.info("Auto-published task %s to %s", task.id, task.platform)
+                else:
+                    results["failed"] += 1
+                    results["errors"].append(
+                        f"Task {task.id}: {pub_result.get('message', 'Unknown error')}"
+                    )
+            except Exception as e:
+                results["failed"] += 1
+                results["errors"].append(f"Task {task.id}: {e}")
+                logger.exception("Failed to auto-publish task %s", task.id)
+
+        await db.commit()
+
+    logger.info(
+        "Scheduled publications: %d published, %d failed",
+        results["published"], results["failed"],
+    )
+    return results
+
+
 # ── Voice Report (placeholder for Phase 5) ──────────────────────────────────
 
 
