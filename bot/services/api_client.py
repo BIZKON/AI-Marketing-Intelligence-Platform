@@ -191,3 +191,36 @@ class APIClient:
 
     async def get_usage_summary(self) -> dict:
         return await self._request("GET", "/competitors/usage/summary")
+
+    # ── Admin ────────────────────────────────────────────────────────────────
+
+    async def admin_stats(self) -> dict:
+        return await self._request("GET", "/admin/stats")
+
+    async def admin_list_users(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        return await self._request("GET", "/admin/users", params={"limit": limit, "offset": offset})
+
+    async def admin_get_user(self, user_id: str) -> dict:
+        return await self._request("GET", f"/admin/users/{user_id}")
+
+    async def admin_update_user(
+        self, user_id: str, is_active: bool | None = None, is_superuser: bool | None = None
+    ) -> dict:
+        body: dict[str, Any] = {}
+        if is_active is not None:
+            body["is_active"] = is_active
+        if is_superuser is not None:
+            body["is_superuser"] = is_superuser
+        return await self._request("PATCH", f"/admin/users/{user_id}", params=body)
+
+    async def admin_change_plan(self, user_id: str, plan: str) -> dict:
+        return await self._request("PATCH", f"/admin/users/{user_id}/plan", params={"plan": plan})
+
+    async def admin_health(self) -> dict:
+        """Fetch system health from the /health/detailed endpoint (not under API prefix)."""
+        client = await get_client()
+        # /health/detailed is mounted at root level, not under /api/v1
+        base = client._base_url
+        resp = await client.get(str(base).rsplit("/api/v1", 1)[0] + "/health/detailed", headers=self._headers)
+        resp.raise_for_status()
+        return resp.json()

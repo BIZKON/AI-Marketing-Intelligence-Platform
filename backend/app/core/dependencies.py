@@ -52,6 +52,15 @@ async def get_active_subscription(
     return subscription
 
 
+async def require_superuser(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Dependency that checks if the current user is a superuser (admin)."""
+    if not user.is_superuser:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
+
+
 def require_plan(min_plan: PlanType):
     """Dependency that checks if user has at least the specified plan level."""
     plan_order = {
