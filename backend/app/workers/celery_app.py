@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import get_settings
 
@@ -29,12 +30,11 @@ celery_app.conf.beat_schedule = {
     },
     "generate-weekly-digests": {
         "task": "app.workers.tasks.generate_weekly_digests",
-        "schedule": {
-            "type": "crontab",
-            "hour": 9,
-            "minute": 0,
-            "day_of_week": 1,  # Monday
-        },
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),  # Monday 09:00 UTC
+    },
+    "check-daily-alerts": {
+        "task": "app.workers.tasks.check_daily_alerts",
+        "schedule": crontab(hour=10, minute=0),  # Daily at 10:00 UTC
     },
 }
 

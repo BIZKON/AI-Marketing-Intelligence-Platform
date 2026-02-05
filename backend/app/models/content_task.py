@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Enum, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -41,6 +41,8 @@ class ContentTask(Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     body: Mapped[str | None] = mapped_column(Text)
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(50), default="text")
+    metadata_json: Mapped[dict | None] = mapped_column(JSONB, default=dict)
     status: Mapped[TaskStatus] = mapped_column(
         Enum(TaskStatus, name="task_status"),
         nullable=False,

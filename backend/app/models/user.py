@@ -36,6 +36,7 @@ class User(Base):
 
     # Brand profile for AI content generation
     brand_name: Mapped[str | None] = mapped_column(String(255))
+    brand_industry: Mapped[str | None] = mapped_column(String(255))
     brand_description: Mapped[str | None] = mapped_column(Text)
     tone_of_voice: Mapped[str | None] = mapped_column(Text)
 
