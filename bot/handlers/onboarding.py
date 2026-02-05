@@ -1,52 +1,99 @@
+"""Onboarding handler: 3-step brand profile setup via FSM."""
+
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
+from bot.middlewares.auth import invalidate_cache
+from bot.services.api_client import APIClient
 from bot.states.onboarding import OnboardingStates
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
 @router.message(Command("setup"))
-async def cmd_setup(message: Message, state: FSMContext) -> None:
+async def cmd_setup(message: Message, state: FSMContext, **kwargs) -> None:
     await state.set_state(OnboardingStates.waiting_brand_name)
     await message.answer(
-        "<b>Let's set up your account!</b>\n\n"
-        "Step 1/3: What is your brand or company name?"
+        "<b>Настройка профиля бренда</b>\n\n"
+        "Шаг 1/3: Введите название вашего бренда или компании:"
     )
 
 
 @router.message(OnboardingStates.waiting_brand_name)
 async def process_brand_name(message: Message, state: FSMContext) -> None:
-    await state.update_data(brand_name=message.text)
+    if not message.text or len(message.text.strip()) < 2:
+        await message.answer("Название должно содержать минимум 2 символа. Попробуйте ещё раз:")
+        return
+
+    await state.update_data(brand_name=message.text.strip())
     await state.set_state(OnboardingStates.waiting_brand_description)
     await message.answer(
-        "Step 2/3: Briefly describe your brand and what you do.\n"
-        "(This helps AI generate relevant content for you.)"
+        "Шаг 2/3: Кратко опишите ваш бренд и чем вы занимаетесь.\n"
+        "(Это поможет AI генерировать релевантный контент.)"
     )
 
 
 @router.message(OnboardingStates.waiting_brand_description)
 async def process_brand_description(message: Message, state: FSMContext) -> None:
-    await state.update_data(brand_description=message.text)
+    if not message.text or len(message.text.strip()) < 10:
+        await message.answer("Описание должно содержать минимум 10 символов. Попробуйте ещё раз:")
+        return
+
+    await state.update_data(brand_description=message.text.strip())
     await state.set_state(OnboardingStates.waiting_tone_of_voice)
     await message.answer(
-        "Step 3/3: Describe your brand's tone of voice.\n"
-        "Examples: professional, friendly, casual, technical, humorous..."
+        "Шаг 3/3: Опишите tone of voice вашего бренда.\n"
+        "Примеры: профессиональный, дружелюбный, экспертный, неформальный, технический..."
     )
 
 
 @router.message(OnboardingStates.waiting_tone_of_voice)
-async def process_tone_of_voice(message: Message, state: FSMContext) -> None:
+async def process_tone_of_voice(
+    message: Message,
+    state: FSMContext,
+    api: APIClient = None,
+    telegram_id: int = 0,
+    **kwargs,
+) -> None:
+    if not message.text or len(message.text.strip()) < 3:
+        await message.answer("Пожалуйста, опишите tone of voice хотя бы парой слов:")
+        return
+
     data = await state.get_data()
-    # TODO: save to DB via API
+    brand_name = data["brand_name"]
+    brand_description = data["brand_description"]
+    tone_of_voice = message.text.strip()
+
+    # Save to backend via API
+    if api:
+        try:
+            await api.update_profile(
+                brand_name=brand_name,
+                brand_description=brand_description,
+                tone_of_voice=tone_of_voice,
+            )
+            # Invalidate cached user data so next request gets fresh profile
+            invalidate_cache(telegram_id)
+        except Exception:
+            logger.exception("Failed to save brand profile")
+            await state.clear()
+            await message.answer(
+                "Произошла ошибка при сохранении профиля. Попробуйте /setup заново."
+            )
+            return
+
     await state.clear()
     await message.answer(
-        f"<b>Setup complete!</b>\n\n"
-        f"Brand: {data['brand_name']}\n"
-        f"Description: {data['brand_description']}\n"
-        f"Tone: {message.text}\n\n"
-        "Use /competitors to start tracking competitors.\n"
-        "Use /billing to manage your subscription."
+        "<b>Профиль настроен!</b>\n\n"
+        f"Бренд: <b>{brand_name}</b>\n"
+        f"Описание: {brand_description}\n"
+        f"Tone of voice: {tone_of_voice}\n\n"
+        "Следующие шаги:\n"
+        "/competitors — добавить конкурентов\n"
+        "/billing — выбрать тарифный план"
     )

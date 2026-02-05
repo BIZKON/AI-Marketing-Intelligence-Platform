@@ -1,58 +1,91 @@
+import logging
+
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.models.subscription import PlanType, Subscription, SubscriptionStatus
+from app.models.subscription import PlanType
 from app.models.user import User
 from app.schemas.subscription import CheckoutRequest, CheckoutResponse, SubscriptionResponse
+from app.services.billing_service import BillingService
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-PRICE_MAP = {
-    PlanType.MONITOR: settings.stripe_price_monitor,
-    PlanType.CREATOR: settings.stripe_price_creator,
-    PlanType.AUTOPILOT: settings.stripe_price_autopilot,
-    PlanType.ENTERPRISE: settings.stripe_price_enterprise,
-}
+
+class PortalResponse(BaseModel):
+    portal_url: str
 
 
-@router.get("/subscription", response_model=SubscriptionResponse | None)
+class SubscriptionDetailResponse(SubscriptionResponse):
+    plan_display: str
+    can_upgrade: bool
+
+
+@router.get("/subscription", response_model=SubscriptionDetailResponse | None)
 async def get_subscription(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Subscription | None:
-    result = await db.execute(
-        select(Subscription)
-        .where(Subscription.user_id == user.id)
-        .order_by(Subscription.created_at.desc())
-    )
-    return result.scalar_one_or_none()
+) -> dict | None:
+    svc = BillingService(db)
+    sub = await svc.get_active_subscription(user.id)
+    if not sub:
+        return None
+    return {
+        "id": sub.id,
+        "plan": sub.plan,
+        "status": sub.status,
+        "stripe_subscription_id": sub.stripe_subscription_id,
+        "plan_display": svc.get_plan_display_name(sub.plan),
+        "can_upgrade": sub.plan != PlanType.ENTERPRISE,
+    }
 
 
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_checkout(
     body: CheckoutRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> CheckoutResponse:
-    price_id = PRICE_MAP.get(body.plan)
-    if not price_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid plan")
+    svc = BillingService(db)
+    try:
+        checkout_url = await svc.create_checkout_session(
+            user=user,
+            plan=body.plan,
+            success_url=f"{settings.telegram_webhook_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{settings.telegram_webhook_url}/billing/cancel",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except stripe.error.StripeError as e:
+        logger.error("Stripe error creating checkout: %s", e)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Payment service error")
 
-    stripe.api_key = settings.stripe_secret_key
-    session = stripe.checkout.Session.create(
-        customer=user.stripe_customer_id or None,
-        mode="subscription",
-        line_items=[{"price": price_id, "quantity": 1}],
-        success_url=f"{settings.telegram_webhook_url}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{settings.telegram_webhook_url}/billing/cancel",
-        metadata={"user_id": str(user.id), "plan": body.plan.value},
-    )
-    return CheckoutResponse(checkout_url=session.url)
+    return CheckoutResponse(checkout_url=checkout_url)
+
+
+@router.post("/portal", response_model=PortalResponse)
+async def create_portal(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PortalResponse:
+    """Create a Stripe Customer Portal session for managing subscription."""
+    svc = BillingService(db)
+    try:
+        portal_url = await svc.create_portal_session(
+            user=user,
+            return_url=f"{settings.telegram_webhook_url}/billing",
+        )
+    except stripe.error.StripeError as e:
+        logger.error("Stripe error creating portal: %s", e)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Payment service error")
+
+    return PortalResponse(portal_url=portal_url)
 
 
 @router.post("/webhook")
@@ -60,54 +93,34 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)) -
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    stripe.api_key = settings.stripe_secret_key
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
-    except (ValueError, stripe.error.SignatureVerificationError):
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid signature")
 
     event_type = event["type"]
     data = event["data"]["object"]
+    svc = BillingService(db)
+
+    logger.info("Stripe webhook received: %s", event_type)
 
     if event_type == "checkout.session.completed":
-        user_id = data["metadata"]["user_id"]
-        plan = PlanType(data["metadata"]["plan"])
-        subscription = Subscription(
-            user_id=user_id,
-            plan=plan,
-            status=SubscriptionStatus.ACTIVE,
-            stripe_subscription_id=data.get("subscription"),
-        )
-        db.add(subscription)
+        await svc.handle_checkout_completed(data)
 
     elif event_type == "invoice.paid":
-        stripe_sub_id = data.get("subscription")
-        if stripe_sub_id:
-            result = await db.execute(
-                select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-            )
-            sub = result.scalar_one_or_none()
-            if sub:
-                sub.status = SubscriptionStatus.ACTIVE
+        await svc.handle_invoice_paid(data)
 
     elif event_type == "invoice.payment_failed":
-        stripe_sub_id = data.get("subscription")
-        if stripe_sub_id:
-            result = await db.execute(
-                select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-            )
-            sub = result.scalar_one_or_none()
-            if sub:
-                sub.status = SubscriptionStatus.PAST_DUE
+        sub = await svc.handle_payment_failed(data)
+        if sub:
+            logger.warning("Payment failed for subscription %s", sub.id)
 
     elif event_type == "customer.subscription.deleted":
-        stripe_sub_id = data.get("id")
-        if stripe_sub_id:
-            result = await db.execute(
-                select(Subscription).where(Subscription.stripe_subscription_id == stripe_sub_id)
-            )
-            sub = result.scalar_one_or_none()
-            if sub:
-                sub.status = SubscriptionStatus.CANCELED
+        await svc.handle_subscription_deleted(data)
+
+    elif event_type == "customer.subscription.updated":
+        await svc.handle_subscription_updated(data)
 
     return {"status": "ok"}
