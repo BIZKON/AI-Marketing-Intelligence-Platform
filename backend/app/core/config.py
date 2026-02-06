@@ -69,7 +69,10 @@ class Settings(BaseSettings):
     # YouTube
     youtube_api_key: str = ""
 
-    # AI
+    # AI — Atlas Cloud unified gateway (replaces individual provider keys)
+    atlas_cloud_api_key: str = ""
+    atlas_cloud_base_url: str = "https://api.atlascloud.ai/api/v1"
+    # Legacy keys kept for fallback / direct access
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 

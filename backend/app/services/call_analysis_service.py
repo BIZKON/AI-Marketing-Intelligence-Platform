@@ -1,7 +1,6 @@
 """Real call analysis service — upload, transcribe, and evaluate real sales calls.
 
-Uses OpenAI Whisper for transcription and Claude for evaluation.
-Supports audio upload via S3 storage.
+Uses Atlas Cloud for transcription (Whisper) and evaluation (LLM).
 """
 
 from __future__ import annotations
@@ -12,18 +11,16 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.services.voice_service import VoiceService
 from app.services.training_service import TrainingService
 from app.models.training_session import SessionMode, SessionStatus, TrainingSession
 from app.models.session_message import SessionMessage
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class CallAnalysisService:
-    """Analyze real sales call recordings."""
+    """Analyze real sales call recordings via Atlas Cloud."""
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -37,11 +34,8 @@ class CallAnalysisService:
         filename: str = "call.mp3",
         scenario_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
-        """Full pipeline: transcribe → detect speakers → evaluate.
-
-        Returns session with evaluation data.
-        """
-        # 1. Transcribe
+        """Full pipeline: transcribe → detect speakers → evaluate."""
+        # 1. Transcribe via Atlas Cloud
         result = await self.voice_service.transcribe_audio(audio_data, filename)
         if result.get("error"):
             return {"error": result["error"]}
@@ -55,10 +49,8 @@ class CallAnalysisService:
 
         # 3. Create a training session for the analysis
         session = TrainingSession(
-            user_id=user_id,
-            scenario_id=scenario_id,
-            mode=SessionMode.REAL_CALL_ANALYSIS,
-            status=SessionStatus.IN_PROGRESS,
+            user_id=user_id, scenario_id=scenario_id,
+            mode=SessionMode.REAL_CALL_ANALYSIS, status=SessionStatus.IN_PROGRESS,
         )
         self.db.add(session)
         await self.db.flush()
@@ -66,20 +58,16 @@ class CallAnalysisService:
         # 4. Store transcript as messages
         current_speaker = None
         current_text = []
-
         for seg in speaker_segments:
             speaker = seg.get("speaker", "Unknown")
             text = seg.get("text", "").strip()
             if not text:
                 continue
-
             if speaker != current_speaker:
                 if current_speaker and current_text:
                     role = "user" if current_speaker == "Admin" else "assistant"
                     msg = SessionMessage(
-                        session_id=session.id,
-                        role=role,
-                        content=" ".join(current_text),
+                        session_id=session.id, role=role, content=" ".join(current_text),
                     )
                     self.db.add(msg)
                 current_speaker = speaker
@@ -87,14 +75,9 @@ class CallAnalysisService:
             else:
                 current_text.append(text)
 
-        # Save last segment
         if current_speaker and current_text:
             role = "user" if current_speaker == "Admin" else "assistant"
-            msg = SessionMessage(
-                session_id=session.id,
-                role=role,
-                content=" ".join(current_text),
-            )
+            msg = SessionMessage(session_id=session.id, role=role, content=" ".join(current_text))
             self.db.add(msg)
 
         await self.db.flush()
@@ -103,7 +86,6 @@ class CallAnalysisService:
         session.status = SessionStatus.COMPLETED
         await self.db.flush()
 
-        # Reload session with messages
         session = await self.training_service.get_session(session.id)
         evaluation = await self.training_service.evaluate_session(session)
 
@@ -111,12 +93,8 @@ class CallAnalysisService:
             "session_id": str(session.id),
             "transcript": formatted_transcript,
             "speakers": [
-                {
-                    "speaker": s.get("speaker"),
-                    "text": s.get("text", ""),
-                    "start": s.get("start"),
-                    "end": s.get("end"),
-                }
+                {"speaker": s.get("speaker"), "text": s.get("text", ""),
+                 "start": s.get("start"), "end": s.get("end")}
                 for s in speaker_segments
             ],
             "evaluation": {
