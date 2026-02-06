@@ -90,6 +90,49 @@
 | 9.3 | **API Rate Limiting per-plan** | LOW | Частично реализован в `rate_limit.py`. Нужна интеграция с Subscription model для per-plan лимитов |
 | 9.4 | **Data Export (CSV/Excel)** | MEDIUM | Нет конфликтов. Новые эндпоинты для экспорта competitors, reports, content |
 
+### Phase 10: Кибер SEO&GEO — Фундамент
+
+> **Подробности:** см. [CYBER_SEO_GEO_INTEGRATION.md](./CYBER_SEO_GEO_INTEGRATION.md)
+
+| # | Фича | Приоритет | Конфликты / Зависимости |
+|---|-------|-----------|------------------------|
+| 10.1 | **Модели данных (BlogPost, BlogCategory)** | HIGH | Новые таблицы, не конфликтует с `content_tasks`. Alembic миграция, расширение User (author_bio, author_photo_url — nullable) |
+| 10.2 | **Агентная инфраструктура** | HIGH | AgentConfig + AgentOrchestrator (WorkflowDAG). Обратно-совместимое расширение BaseAgent. 9 новых агентов: Investigator, Architect, ResearchManager, Journalist, Writer, Editor, Structurer, ArtDirector, SEOSpec |
+| 10.3 | **WordPress Publisher** | HIGH | Конфликт с `publisher.py` — добавление `_publish_wordpress()`. Нужен WP REST API клиент. Расширение `.env` (WP_API_URL, WP_USERNAME, WP_APP_PASSWORD) |
+| 10.4 | **Perplexity Research Tool** | MEDIUM | Новый сервис `perplexity_client.py`, интеграция как tool для InvestigatorAgent и ResearchManagerAgent |
+| 10.5 | **Image Generator Service** | MEDIUM | Новый сервис `image_generator.py`, Replicate/Kie.ai API, S3 upload через MinIO (готова инфраструктура) |
+
+### Phase 11: SEO Content Pipeline
+
+| # | Фича | Приоритет | Конфликты / Зависимости |
+|---|-------|-----------|------------------------|
+| 11.1 | **SEO Pipeline Orchestrator** | HIGH | `seo_pipeline.py` — мастер-оркестратор. WF1 Brain (Investigator→Architect→Validator), WF2 Hook (Journalist→ArtDirector), WF3 Body Loop (Writer→Editor→Structurer), WF4 Assembly (Conclusion+FAQ+Author), WF5 Publisher (WordPress + revalidation). Зависит от 10.2 AgentOrchestrator |
+| 11.2 | **Blog API Router** | HIGH | Новый роутер `/api/v1/blog/`. CRUD для BlogPost, категории, теги, fulltext + Qdrant семантический поиск. Зависит от 10.1 моделей |
+| 11.3 | **SEO Pipeline Celery Tasks** | MEDIUM | Celery chain: brain→hook→body→assembly→publish. Альтернатива N8N (Phase 13) для тех, кто не хочет внешние зависимости |
+
+### Phase 12: SEO Frontend (Next.js Blog)
+
+| # | Фича | Приоритет | Конфликты / Зависимости |
+|---|-------|-----------|------------------------|
+| 12.1 | **Blog Pages** | HIGH | `/blog` (ISR 3600s), `/blog/[slug]` (ISR 60s), `/blog/category/[slug]`. Конфликт с Phase 6.3-6.6 Dashboard — использовать общие UI компоненты. Раздельные пути: `/dashboard/*` vs `/blog/*` |
+| 12.2 | **SEO Components** | HIGH | Schema.org (Article, FAQ, Breadcrumb), dynamic meta tags, sitemap.xml, robots.txt, Table of Contents, Breadcrumbs |
+| 12.3 | **UX Blog Components** | MEDIUM | AuthorBox, RelatedPosts (Qdrant similarity), FAQBlock с аккордеоном, ShareButtons, ReadingProgress bar |
+
+### Phase 13: N8N + Google Sheets автоматизация
+
+| # | Фича | Приоритет | Конфликты / Зависимости |
+|---|-------|-----------|------------------------|
+| 13.1 | **N8N инфраструктура** | MEDIUM | Добавить N8N в docker-compose.yml, Nginx reverse proxy, webhook endpoints в FastAPI, auth N8N→Backend |
+| 13.2 | **Google Sheets интеграция** | MEDIUM | `google_sheets_sync.py`, CONVEYOR/PUBLISHED/SETTINGS листы. Trigger: New Row → Pipeline Start. Нужен `GOOGLE_SHEETS_CREDENTIALS_JSON` |
+| 13.3 | **N8N Workflows (7+1)** | MEDIUM | WF0 Master, WF1-4 Content Pipeline, WF5 Publisher, WF6 Indexer (Google/Yandex IndexNow), WF7 Image Gen. Зависит от Phase 11 SEO Pipeline |
+
+### Phase 14: Качество и мониторинг SEO
+
+| # | Фича | Приоритет | Конфликты / Зависимости |
+|---|-------|-----------|------------------------|
+| 14.1 | **Content Quality Checks** | HIGH | AI Detection score (EditorAgent), SEO Checklist автоматический, Schema.org валидация, Yoast-like scoring в pipeline |
+| 14.2 | **Индексация** | MEDIUM | Google IndexNow API, Yandex Webmaster API, Search Console интеграция, мониторинг позиций (опционально, SEMRUSH/DataForSEO) |
+
 ---
 
 ## Анализ конфликтов (подробный)
@@ -136,18 +179,58 @@
 - Data Export — новые эндпоинты, изолированы
 - Audit Log — middleware, не ломает существующую логику
 
+### Конфликты Кибер SEO&GEO (Phases 10-14)
+
+#### 7. BaseAgent расширение для 12 агентов
+- **Файлы:** `base.py`, новые `agents/seo/*.py`
+- **Суть:** Нужен `AgentConfig` (per-agent model/temperature/rag_limit) и `AgentOrchestrator` (WorkflowDAG)
+- **Рекомендация:** Обратно-совместимое расширение — AgentConfig с дефолтами, AgentOrchestrator как отдельный класс
+
+#### 8. PublisherService расширение (WordPress)
+- **Файлы:** `publisher.py`
+- **Суть:** Добавление `_publish_wordpress()`, WP REST API клиент
+- **Рекомендация:** Аналогично `_publish_telegram()` — новый elif branch, изолирован
+
+#### 9. ContentTask vs BlogPost
+- **Файлы:** `content_task.py` (существующий), `blog_post.py` (новый)
+- **Суть:** BlogPost — отдельная таблица с SEO-полями (slug, meta, schema.org). НЕ расширение ContentTask
+- **Рекомендация:** Полная изоляция — разные модели, разные роутеры, разные пайплайны
+
+#### 10. Next.js Dashboard vs Blog
+- **Файлы:** `frontend/src/app/dashboard/*` vs `frontend/src/app/blog/*`
+- **Суть:** Оба используют Next.js 15, но Blog требует ISR, SEO meta, sitemap
+- **Рекомендация:** Общие UI-компоненты, раздельные layouts. Blog = public, Dashboard = auth-protected
+
 ---
 
 ## Рекомендуемый порядок реализации
 
 ```
-Phase 6 (Достройка пробелов)          ← НАЧАТЬ ЗДЕСЬ
+Phase 6 (Достройка пробелов)           ← НАЧАТЬ ЗДЕСЬ
 ├── 6.1 Instagram Parser
 ├── 6.2 SalesAgent Integration
 ├── 6.3 Dashboard: Overview (real data)
 ├── 6.4 Dashboard: Competitors page
 ├── 6.5 Dashboard: Content page
 └── 6.6 Dashboard: Reports page
+
+Phase 10 (Фундамент SEO&GEO)           ← ПАРАЛЛЕЛЬНО С 6.3-6.6
+├── 10.1 BlogPost + BlogCategory models
+├── 10.2 AgentOrchestrator + 9 агентов
+├── 10.3 WordPress Publisher
+├── 10.4 Perplexity Tool
+└── 10.5 Image Generator
+
+Phase 11 (SEO Pipeline)
+├── 11.1 SEO Pipeline Orchestrator
+├── 11.2 Blog API Router
+└── 11.3 Celery Tasks для pipeline
+
+Phase 12 (SEO Frontend) + Phase 6.3-6.6 (Dashboard)
+├── 12.1 Blog Pages (ISR)
+├── 12.2 SEO Components
+├── 12.3 UX Blog Components
+└── Dashboard pages (общие UI-компоненты)
 
 Phase 7 (Smart-аналитика)
 ├── 7.1 Trend Detection
@@ -156,13 +239,22 @@ Phase 7 (Smart-аналитика)
 ├── 7.4 Content Performance Tracking
 └── 7.5 Smart Scheduling
 
+Phase 13 (N8N + Google Sheets)
+├── 13.1 N8N инфраструктура
+├── 13.2 Google Sheets интеграция
+└── 13.3 N8N Workflows (7+1)
+
 Phase 8 (Интеграции)
 ├── 8.1 YouTube auto-publish
 ├── 8.2 Notification System
 ├── 8.3 Webhook API
 └── 8.4 i18n (optional)
 
-Phase 9 (Масштабирование)
+Phase 14 (Качество SEO)
+├── 14.1 Content Quality Checks
+└── 14.2 Индексация
+
+Phase 9 (Масштабирование)               ← ПОСЛЕДНЯЯ (ломающее изменение)
 ├── 9.1 Team/Organization accounts
 ├── 9.2 Audit Log
 ├── 9.3 Per-plan rate limiting
@@ -174,6 +266,7 @@ Phase 9 (Масштабирование)
 ## Зависимости между фичами
 
 ```
+ОРИГИНАЛЬНЫЕ ФИЧИ:
 6.1 Instagram Parser ──────────────────────── (независим)
 6.2 SalesAgent ────────────────────────────── (независим)
 6.3-6.6 Dashboard ─────────────────────────── (независимы от бэкенда)
@@ -184,4 +277,29 @@ Phase 9 (Масштабирование)
 8.1 YT Publish ── зависит от ── OAuth2 setup
 8.2 Notifications ─ зависит от ── email service setup
 9.1 Teams ──── зависит от ── ВСЕ предыдущие фазы (ломающее изменение)
+
+КИБЕР SEO&GEO:
+10.1 BlogPost models ──────────────────────── (независим, новые таблицы)
+10.2 AgentOrchestrator ── зависит от ── BaseAgent (расширение)
+10.3 WordPress Publisher ── зависит от ── publisher.py (расширение)
+10.4 Perplexity Tool ─────────────────────── (независим)
+10.5 Image Generator ─────────────────────── (независим, MinIO готов)
+11.1 SEO Pipeline ──── зависит от ── 10.2 + 10.4 + 10.5
+11.2 Blog API ──── зависит от ── 10.1
+11.3 Celery Tasks ── зависит от ── 11.1
+12.1 Blog Pages ──── зависит от ── 11.2 (API)
+12.2 SEO Components ── зависит от ── 12.1
+12.3 UX Components ── зависит от ── 12.1
+13.1 N8N ──────────── зависит от ── docker-compose (расширение)
+13.2 Google Sheets ── зависит от ── 13.1
+13.3 N8N Workflows ── зависит от ── 11.1 + 13.1 + 13.2
+14.1 Quality Checks ── зависит от ── 11.1 (pipeline)
+14.2 Индексация ──── зависит от ── 12.1 (blog должен быть live)
+
+ПЕРЕКРЁСТНЫЕ ЗАВИСИМОСТИ:
+Phase 6.3-6.6 Dashboard ←→ Phase 12 Blog (общие UI компоненты)
+Phase 7.1 Trends ──────────→ Phase 11 (тренды для тем статей)
+Phase 7.2 Sentiment ───────→ Phase 11 EditorAgent (тональность)
+Phase 8.2 Notifications ───→ Phase 13 N8N (уведомления о статьях)
+Phase 9.1 Teams ───────────→ BlogPost.user_id → organization_id
 ```
