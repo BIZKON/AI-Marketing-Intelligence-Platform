@@ -163,6 +163,43 @@ export interface TrainingAnalyticsResponse {
   achievements: TrainingAchievementResponse[];
 }
 
+// Gamification types
+export interface GamificationProfileResponse {
+  level: string;
+  xp: number;
+  coins: number;
+  current_streak: number;
+  longest_streak: number;
+  last_active_date: string | null;
+}
+
+export interface DailyChallengeResponse {
+  id: string;
+  type: string;
+  label: string;
+  target: number;
+  progress: number;
+  reward_coins: number;
+  is_completed: boolean;
+}
+
+export interface ShopItemResponse {
+  id: string;
+  name: string;
+  price: number;
+  type: string;
+}
+
+// A/B Test types
+export interface ABTestResponse {
+  id: string;
+  name: string;
+  variant_a: string;
+  variant_b: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 // Token management helpers (#057)
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -356,4 +393,36 @@ export const api = {
 
   getTrainingAchievements: (token: string) =>
     apiFetch<TrainingAchievementResponse[]>("/training/achievements", { token }),
+
+  // Gamification
+  getGamificationProfile: (token: string) =>
+    apiFetch<GamificationProfileResponse>("/gamification/profile", { token }),
+
+  getDailyChallenges: (token: string) =>
+    apiFetch<DailyChallengeResponse[]>("/gamification/challenges", { token }),
+
+  getShopItems: (token: string) =>
+    apiFetch<ShopItemResponse[]>("/gamification/shop", { token }),
+
+  // A/B Tests
+  getABTests: (token: string) =>
+    apiFetch<ABTestResponse[]>("/ab-tests/", { token }),
+
+  createABTest: (token: string, data: { name: string; variant_a: string; variant_b: string }) =>
+    apiFetch<ABTestResponse>("/ab-tests/", { token, method: "POST", body: JSON.stringify(data) }),
+
+  // Multiplayer
+  createMultiplayerSession: (token: string, scenarioId: string) =>
+    apiFetch<{ id: string; session_code: string; status: string }>("/multiplayer/", {
+      token,
+      method: "POST",
+      body: JSON.stringify({ scenario_id: scenarioId }),
+    }),
+
+  joinMultiplayerSession: (token: string, sessionCode: string) =>
+    apiFetch<{ session_id: string; status: string }>("/multiplayer/join", {
+      token,
+      method: "POST",
+      body: JSON.stringify({ session_code: sessionCode }),
+    }),
 };

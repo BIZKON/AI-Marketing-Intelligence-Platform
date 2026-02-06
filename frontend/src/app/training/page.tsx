@@ -91,11 +91,15 @@ export default function TrainingPage() {
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
               Sales Training
             </h1>
-            <nav className="flex gap-4">
+            <nav className="flex gap-4 flex-wrap">
               <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">Dashboard</Link>
               <Link href="/training" className="text-sm font-medium text-brand-600">Scenarios</Link>
               <Link href="/training/analytics" className="text-sm font-medium text-gray-500 hover:text-gray-700">Analytics</Link>
               <Link href="/training/history" className="text-sm font-medium text-gray-500 hover:text-gray-700">History</Link>
+              <Link href="/training/multiplayer" className="text-sm font-medium text-gray-500 hover:text-gray-700">Multiplayer</Link>
+              <Link href="/training/gamification" className="text-sm font-medium text-gray-500 hover:text-gray-700">Gamification</Link>
+              <Link href="/training/ab-tests" className="text-sm font-medium text-gray-500 hover:text-gray-700">A/B Tests</Link>
+              <Link href="/training/export" className="text-sm font-medium text-gray-500 hover:text-gray-700">Export</Link>
             </nav>
           </div>
         </div>
@@ -135,7 +139,15 @@ export default function TrainingPage() {
         )}
 
         {/* Scenarios Grid */}
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Training Scenarios</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Training Scenarios</h2>
+          <Link
+            href="/training/scenarios/create"
+            className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-500"
+          >
+            Create Scenario
+          </Link>
+        </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {scenarios.map((scenario) => (
             <div
