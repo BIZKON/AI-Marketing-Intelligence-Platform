@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.models.content_plan import PlanPeriod, PlanStatus
 from app.models.content_task import TaskStatus
@@ -111,6 +111,13 @@ class ScheduleRequest(BaseModel):
     """Schedule a task for future auto-publishing."""
     task_id: uuid.UUID
     scheduled_at: datetime
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def ensure_timezone_aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
 
 
 class PublishResponse(BaseModel):

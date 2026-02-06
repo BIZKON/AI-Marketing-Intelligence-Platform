@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -15,12 +16,14 @@ logger = logging.getLogger(__name__)
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api/v1")
 _client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
 
 
 async def get_client() -> httpx.AsyncClient:
     global _client
-    if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(base_url=API_BASE_URL, timeout=30.0)
+    async with _client_lock:
+        if _client is None or _client.is_closed:
+            _client = httpx.AsyncClient(base_url=API_BASE_URL, timeout=30.0)
     return _client
 
 

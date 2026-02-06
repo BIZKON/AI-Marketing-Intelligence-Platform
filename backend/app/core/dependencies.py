@@ -42,12 +42,14 @@ async def get_active_subscription(
     db: AsyncSession = Depends(get_db),
 ) -> Subscription:
     result = await db.execute(
-        select(Subscription).where(
+        select(Subscription)
+        .where(
             Subscription.user_id == user.id,
             Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
         )
+        .order_by(Subscription.created_at.desc())
     )
-    subscription = result.scalar_one_or_none()
+    subscription = result.scalars().first()
     if subscription is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active subscription")
     return subscription
