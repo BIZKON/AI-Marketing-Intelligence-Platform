@@ -52,11 +52,12 @@ class ReportGenerator:
         """
         since = datetime.now(timezone.utc) - timedelta(days=days)
 
-        # Fetch competitors
+        # Fetch competitors — cast string IDs to UUID (#037)
         if competitor_ids:
+            uuid_ids = [uuid.UUID(cid) if not isinstance(cid, uuid.UUID) else cid for cid in competitor_ids]
             competitors = (await self.db.execute(
                 select(Competitor).where(
-                    Competitor.id.in_(competitor_ids),
+                    Competitor.id.in_(uuid_ids),
                     Competitor.user_id == user.id,
                 )
             )).scalars().all()

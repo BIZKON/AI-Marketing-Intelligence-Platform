@@ -6,6 +6,7 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.handlers import admin, common, competitors, content, onboarding, reports
 from bot.middlewares.auth import AuthMiddleware
@@ -24,19 +25,36 @@ def _get_bot_token() -> str:
     return token
 
 
+def _get_fsm_storage():
+    """Get FSM storage — Redis if available, otherwise memory (#067)."""
+    redis_url = os.getenv("REDIS_URL", "")
+    if redis_url:
+        try:
+            from aiogram.fsm.storage.redis import RedisStorage
+            logger.info("Using Redis FSM storage: %s", redis_url.split("@")[-1])
+            return RedisStorage.from_url(redis_url)
+        except ImportError:
+            logger.warning("aioredis not installed, falling back to MemoryStorage")
+        except Exception:
+            logger.exception("Failed to init Redis FSM storage, falling back to MemoryStorage")
+    return MemoryStorage()
+
+
 async def main() -> None:
     bot = Bot(
         token=_get_bot_token(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher()
+    storage = _get_fsm_storage()
+    dp = Dispatcher(storage=storage)
 
     # Register middlewares for messages
     dp.message.middleware(RateLimitMiddleware())
     dp.message.middleware(AuthMiddleware())
     dp.message.middleware(SubscriptionMiddleware())
 
-    # Register middlewares for callback queries too
+    # Register middlewares for callback queries (#066: rate limit included)
+    dp.callback_query.middleware(RateLimitMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
     dp.callback_query.middleware(SubscriptionMiddleware())
 
@@ -53,6 +71,8 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         await close_client()
+        if hasattr(storage, "close"):
+            await storage.close()
         logger.info("Bot stopped.")
 
 

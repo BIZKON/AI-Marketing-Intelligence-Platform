@@ -159,13 +159,13 @@ async def create_task(
             detail="Content tasks require Creator plan or higher",
         )
 
-    # Count tasks created in the current month only
+    # Count tasks with row-level lock to prevent race condition (#048)
     month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     count_result = await db.execute(
         select(func.count()).where(
             ContentTask.user_id == user.id,
             ContentTask.created_at >= month_start,
-        )
+        ).with_for_update(read=True)
     )
     current_count = count_result.scalar() or 0
 
@@ -277,9 +277,11 @@ async def generate_draft(
     _sub: Subscription = Depends(require_plan(PlanType.CREATOR)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Generate an AI draft for a single content task."""
-    from app.services.content_generator import ContentGenerator
+    """Generate an AI draft for a single content task.
 
+    Dispatches to Celery for background processing (#043) unless
+    the task is quick enough to complete inline.
+    """
     result = await db.execute(
         select(ContentTask).where(ContentTask.id == body.task_id, ContentTask.user_id == user.id)
     )
@@ -293,13 +295,14 @@ async def generate_draft(
             detail="Can only generate drafts for pending or draft tasks",
         )
 
-    generator = ContentGenerator(db)
-    updated_task = await generator.generate_draft(task, user)
+    # Dispatch to Celery background task (#043)
+    from app.workers.tasks import generate_single_draft
+    generate_single_draft.delay(str(task.id), str(user.id))
 
     return {
-        "task_id": updated_task.id,
-        "status": updated_task.status.value,
-        "body_preview": (updated_task.body or "")[:300],
+        "task_id": task.id,
+        "status": "generating",
+        "body_preview": None,
     }
 
 

@@ -1,7 +1,10 @@
+import logging
 from functools import lru_cache
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -21,7 +24,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
 
     @model_validator(mode="after")
-    def _validate_secret_key(self) -> "Settings":
+    def _validate_settings(self) -> "Settings":
         if self.secret_key in ("change-me-in-production", ""):
             raise ValueError(
                 "SECRET_KEY must be set to a secure random value. "
@@ -29,6 +32,12 @@ class Settings(BaseSettings):
             )
         if len(self.secret_key) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters long")
+        # Warn if CORS allows localhost in production (#053)
+        if self.app_env == "production" and "localhost" in self.cors_origins:
+            logger.warning(
+                "CORS_ORIGINS contains localhost in production mode. "
+                "Set CORS_ORIGINS to your actual frontend domain."
+            )
         return self
 
     # Database
@@ -42,6 +51,11 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str = ""
     telegram_webhook_url: str = ""
+    telegram_api_id: str = ""
+    telegram_api_hash: str = ""
+
+    # VK
+    vk_access_token: str = ""
 
     # Stripe
     stripe_secret_key: str = ""

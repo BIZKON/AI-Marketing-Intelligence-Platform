@@ -1,3 +1,9 @@
+import Link from "next/link";
+
+const API_DOCS_URL = process.env.NEXT_PUBLIC_API_URL
+  ? `${process.env.NEXT_PUBLIC_API_URL}/docs`
+  : "http://localhost:8000/api/v1/docs";
+
 export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-8">
@@ -10,14 +16,16 @@ export default function Home() {
           Track competitors, generate insights, and automate content creation.
         </p>
         <div className="mt-10 flex items-center justify-center gap-x-6">
-          <a
+          <Link
             href="/dashboard"
             className="rounded-md bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-500 transition-colors"
           >
             Go to Dashboard
-          </a>
+          </Link>
           <a
-            href="/api/v1/docs"
+            href={API_DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-sm font-semibold leading-6 text-gray-900 dark:text-gray-300"
           >
             API Docs <span aria-hidden="true">&rarr;</span>

@@ -108,6 +108,12 @@ async def delete_competitor(
     competitor = result.scalar_one_or_none()
     if not competitor:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Competitor not found")
+
+    # Clean up orphaned Qdrant vectors before deleting competitor (#040)
+    from app.services.vectordb.qdrant_client import QdrantService
+    qdrant = QdrantService()
+    await qdrant.delete_by_competitor(str(competitor_id))
+
     await db.delete(competitor)
 
 

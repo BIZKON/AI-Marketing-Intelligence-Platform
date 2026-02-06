@@ -216,6 +216,35 @@ async def _check_daily_alerts_async() -> dict:
     return results
 
 
+# ── Single Draft Generation (#043) ──────────────────────────────────────────
+
+
+@celery_app.task(bind=True, max_retries=2, soft_time_limit=120, time_limit=150)
+def generate_single_draft(self, task_id: str, user_id: str) -> dict:
+    """Generate an AI draft for a single content task. Dispatched from HTTP handler."""
+    logger.info("Generating draft for task %s user %s", task_id, user_id)
+    return _run_async(_generate_single_draft_async(task_id, user_id))
+
+
+async def _generate_single_draft_async(task_id: str, user_id: str) -> dict:
+    async with async_session_factory() as db:
+        task = await db.get(ContentTask, uuid_mod.UUID(task_id))
+        user = await db.get(User, uuid_mod.UUID(user_id))
+        if not task or not user:
+            return {"status": "error", "message": "Task or user not found"}
+
+        from app.services.content_generator import ContentGenerator
+        generator = ContentGenerator(db)
+        updated_task = await generator.generate_draft(task, user)
+        await db.commit()
+
+        return {
+            "status": "ok",
+            "task_id": task_id,
+            "task_status": updated_task.status.value,
+        }
+
+
 # ── Content Plan Generation ──────────────────────────────────────────────────
 
 

@@ -48,6 +48,7 @@ class ContentTaskUpdate(BaseModel):
     content_type: str | None = None
     status: TaskStatus | None = None
     scheduled_at: datetime | None = None
+    published_at: datetime | None = None
     metadata_json: dict[str, Any] | None = None
 
 

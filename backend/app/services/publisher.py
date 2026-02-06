@@ -6,19 +6,20 @@ Handles the actual API calls to push approved content to target channels.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import httpx
 
+from app.core.config import get_settings
 from app.models.content_task import ContentTask
 
 logger = logging.getLogger(__name__)
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+_settings = get_settings()
+TELEGRAM_BOT_TOKEN = _settings.telegram_bot_token
 TELEGRAM_API_BASE = "https://api.telegram.org/bot"
 
-VK_ACCESS_TOKEN = os.getenv("VK_ACCESS_TOKEN", "")
+VK_ACCESS_TOKEN = _settings.vk_access_token
 VK_API_VERSION = "5.199"
 VK_API_BASE = "https://api.vk.com/method"
 

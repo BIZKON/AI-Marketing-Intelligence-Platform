@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { api, ApiError, getToken } from "@/lib/api";
 import type { CompetitorResponse, SubscriptionResponse, ContentTaskResponse } from "@/lib/api";
 
 interface DashboardData {
@@ -11,15 +13,16 @@ interface DashboardData {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const token = getToken();
+    // Auth guard: redirect to home if not authenticated (#058)
     if (!token) {
-      setError("Not authenticated");
-      setLoading(false);
+      router.replace("/");
       return;
     }
 
@@ -40,7 +43,7 @@ export default function Dashboard() {
     }
 
     fetchData();
-  }, []);
+  }, [router]);
 
   if (loading) {
     return (
@@ -72,10 +75,10 @@ export default function Dashboard() {
               Dashboard
             </h1>
             <nav className="flex gap-4">
-              <a href="/dashboard" className="text-sm font-medium text-brand-600">Overview</a>
-              <a href="/dashboard/competitors" className="text-sm font-medium text-gray-500 hover:text-gray-700">Competitors</a>
-              <a href="/dashboard/content" className="text-sm font-medium text-gray-500 hover:text-gray-700">Content</a>
-              <a href="/dashboard/reports" className="text-sm font-medium text-gray-500 hover:text-gray-700">Reports</a>
+              <Link href="/dashboard" className="text-sm font-medium text-brand-600">Overview</Link>
+              <Link href="/dashboard/competitors" className="text-sm font-medium text-gray-500 hover:text-gray-700">Competitors</Link>
+              <Link href="/dashboard/content" className="text-sm font-medium text-gray-500 hover:text-gray-700">Content</Link>
+              <Link href="/dashboard/reports" className="text-sm font-medium text-gray-500 hover:text-gray-700">Reports</Link>
             </nav>
           </div>
         </div>
@@ -86,7 +89,7 @@ export default function Dashboard() {
         {/* Stats cards */}
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <StatsCard title="Competitors" value={String(competitorCount)} description="Being tracked" />
-          <StatsCard title="Reports" value="—" description="This month" />
+          <StatsCard title="Reports" value="-" description="This month" />
           <StatsCard title="Content Tasks" value={String(taskCount)} description="In pipeline" />
           <StatsCard title="Plan" value={plan.charAt(0).toUpperCase() + plan.slice(1)} description="Current subscription" />
         </div>
