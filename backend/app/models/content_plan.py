@@ -51,7 +51,7 @@ class ContentPlan(Base):
 
     # Relationships
     user: Mapped[User] = relationship(back_populates="content_plans")
-    tasks: Mapped[list[ContentTask]] = relationship(back_populates="content_plan", cascade="all, delete-orphan")
+    tasks: Mapped[list[ContentTask]] = relationship(back_populates="content_plan", passive_deletes=True)
 
     def __repr__(self) -> str:
         return f"<ContentPlan {self.id} period={self.period} status={self.status}>"

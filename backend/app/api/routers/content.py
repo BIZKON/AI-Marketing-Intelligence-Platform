@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_active_subscription, get_current_user, require_plan
 from app.core.limits import get_plan_limits
-from app.models.content_plan import ContentPlan
+from app.models.content_plan import ContentPlan, PlanStatus
 from app.models.content_task import ContentTask, TaskStatus
 from app.models.subscription import PlanType, Subscription
 from app.models.user import User
@@ -64,7 +64,7 @@ async def create_plan(
         user_id=user.id,
         title=body.title or f"Контент-план ({body.period.value})",
         period=body.period,
-        status="draft",
+        status=PlanStatus.DRAFT,
         content=plan_data.get("structured_data", {}),
         ai_response=plan_data.get("content", ""),
     )
@@ -159,8 +159,13 @@ async def create_task(
             detail="Content tasks require Creator plan or higher",
         )
 
+    # Count tasks created in the current month only
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     count_result = await db.execute(
-        select(func.count()).where(ContentTask.user_id == user.id)
+        select(func.count()).where(
+            ContentTask.user_id == user.id,
+            ContentTask.created_at >= month_start,
+        )
     )
     current_count = count_result.scalar() or 0
 
@@ -388,6 +393,12 @@ async def publish_task(
 
     publisher = PublisherService()
     pub_result = await publisher.publish(task, target_channel=body.target_channel)
+
+    if pub_result.get("status") != "ok":
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=pub_result.get("message", "Publishing failed"),
+        )
 
     task.status = TaskStatus.PUBLISHED
     task.published_at = datetime.now(timezone.utc)

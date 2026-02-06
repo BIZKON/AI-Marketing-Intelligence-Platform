@@ -5,14 +5,15 @@ All tasks use sync wrappers around async code since Celery workers are synchrono
 
 import asyncio
 import logging
+import uuid as uuid_mod
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
 from app.models.competitor import Competitor
-from app.models.content_plan import ContentPlan
-from app.models.content_task import ContentTask
+from app.models.content_plan import ContentPlan, PlanStatus
+from app.models.content_task import ContentTask, TaskStatus
 from app.models.report import Report
 from app.models.subscription import Subscription, SubscriptionStatus
 from app.models.user import User
@@ -35,7 +36,7 @@ def _run_async(coro):
 # ── Data Collection ──────────────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def collect_competitor_data(self) -> dict:
     """Collect data from all active competitors across all platforms.
 
@@ -48,7 +49,11 @@ def collect_competitor_data(self) -> dict:
     5. Store in DB
     """
     logger.info("Starting competitor data collection")
-    return _run_async(_collect_competitor_data_async())
+    try:
+        return _run_async(_collect_competitor_data_async())
+    except Exception as exc:
+        logger.exception("Competitor data collection failed, retrying")
+        raise self.retry(exc=exc)
 
 
 async def _collect_competitor_data_async() -> dict:
@@ -103,7 +108,11 @@ def generate_weekly_digests(self) -> dict:
     Runs weekly (Monday 9:00 UTC) via Celery Beat.
     """
     logger.info("Starting weekly digest generation")
-    return _run_async(_generate_weekly_digests_async())
+    try:
+        return _run_async(_generate_weekly_digests_async())
+    except Exception as exc:
+        logger.exception("Weekly digest generation failed, retrying")
+        raise self.retry(exc=exc)
 
 
 async def _generate_weekly_digests_async() -> dict:
@@ -154,7 +163,11 @@ def check_daily_alerts(self) -> dict:
     Runs daily via Celery Beat.
     """
     logger.info("Starting daily alert check")
-    return _run_async(_check_daily_alerts_async())
+    try:
+        return _run_async(_check_daily_alerts_async())
+    except Exception as exc:
+        logger.exception("Daily alert check failed, retrying")
+        raise self.retry(exc=exc)
 
 
 async def _check_daily_alerts_async() -> dict:
@@ -208,7 +221,7 @@ def generate_content_plan(self, user_id: str, period: str = "weekly") -> dict:
 
 async def _generate_content_plan_async(user_id: str, period: str) -> dict:
     async with async_session_factory() as db:
-        user = await db.get(User, user_id)
+        user = await db.get(User, uuid_mod.UUID(user_id))
         if not user:
             return {"status": "error", "message": f"User {user_id} not found"}
 
@@ -219,7 +232,7 @@ async def _generate_content_plan_async(user_id: str, period: str) -> dict:
         plan = ContentPlan(
             user_id=user.id,
             period=period,
-            status="draft",
+            status=PlanStatus.DRAFT,
             content=plan_data.get("structured_data", {}),
             ai_response=plan_data.get("content", ""),
         )
@@ -236,7 +249,7 @@ async def _generate_content_plan_async(user_id: str, period: str) -> dict:
                 platform=task_data.get("platform", ""),
                 content_type=task_data.get("format", "text"),
                 body=task_data.get("topic", ""),
-                status="pending",
+                status=TaskStatus.PENDING,
                 metadata_json={
                     "key_points": task_data.get("key_points", []),
                     "hashtags": task_data.get("hashtags", []),
@@ -275,7 +288,7 @@ async def _process_scheduled_publications_async() -> dict:
 
         # Find tasks that are approved, scheduled, and past their scheduled time
         stmt = select(ContentTask).where(
-            ContentTask.status == "approved",
+            ContentTask.status == TaskStatus.APPROVED,
             ContentTask.scheduled_at.isnot(None),
             ContentTask.scheduled_at <= now,
         )
@@ -292,7 +305,7 @@ async def _process_scheduled_publications_async() -> dict:
                 pub_result = await publisher.publish(task)
 
                 if pub_result.get("status") == "ok":
-                    task.status = "published"
+                    task.status = TaskStatus.PUBLISHED
                     task.published_at = now
                     task.metadata_json = {
                         **(task.metadata_json or {}),

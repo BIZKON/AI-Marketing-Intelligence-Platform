@@ -286,13 +286,17 @@ class ReportGenerator:
 
     async def _get_avg_engagement(self, competitor_id: uuid.UUID) -> float:
         """Get average engagement for the last 30 posts."""
-        result = await self.db.execute(
+        # Use subquery to first select last 30 posts, then average their engagement
+        subq = (
             select(
-                func.avg(CompetitorPost.likes + CompetitorPost.comments + CompetitorPost.shares),
-            ).where(
-                CompetitorPost.competitor_id == competitor_id,
-            ).order_by(CompetitorPost.published_at.desc()).limit(30)
+                (CompetitorPost.likes + CompetitorPost.comments + CompetitorPost.shares).label("total_engagement"),
+            )
+            .where(CompetitorPost.competitor_id == competitor_id)
+            .order_by(CompetitorPost.published_at.desc())
+            .limit(30)
+            .subquery()
         )
+        result = await self.db.execute(select(func.avg(subq.c.total_engagement)))
         avg = result.scalar()
         return float(avg) if avg else 0.0
 

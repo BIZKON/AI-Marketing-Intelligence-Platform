@@ -21,6 +21,17 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     result_expires=3600,
+    # Task timeouts
+    task_soft_time_limit=300,  # 5 min soft limit
+    task_time_limit=600,  # 10 min hard limit
+    # Queue routing
+    task_routes={
+        "app.workers.tasks.collect_competitor_data": {"queue": "collection"},
+        "app.workers.tasks.generate_voice_report": {"queue": "media"},
+        "app.workers.tasks.generate_video_report": {"queue": "media"},
+        "app.workers.tasks.*": {"queue": "default"},
+    },
+    task_default_queue="default",
 )
 
 celery_app.conf.beat_schedule = {

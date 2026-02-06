@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -14,6 +14,13 @@ class RegisterRequest(BaseModel):
     password: str
     full_name: str | None = None
 
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -27,8 +34,8 @@ class TelegramAuthRequest(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     photo_url: str | None = None
-    auth_date: int | None = None
-    hash: str | None = None
+    auth_date: int
+    hash: str
 
 
 class AuthResponse(BaseModel):

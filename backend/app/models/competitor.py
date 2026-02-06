@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.competitor_post import CompetitorPost
     from app.models.user import User
 
 
@@ -36,6 +37,7 @@ class Competitor(Base):
 
     # Relationships
     user: Mapped[User] = relationship(back_populates="competitors")
+    posts: Mapped[list[CompetitorPost]] = relationship(back_populates="competitor", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Competitor {self.id} name={self.name}>"

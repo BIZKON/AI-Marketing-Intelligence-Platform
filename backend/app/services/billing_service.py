@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
@@ -67,7 +68,8 @@ class BillingService:
         if user.stripe_customer_id:
             return user.stripe_customer_id
 
-        customer = stripe.Customer.create(
+        customer = await asyncio.to_thread(
+            stripe.Customer.create,
             email=user.email,
             name=user.full_name,
             metadata={"user_id": str(user.id), "telegram_id": str(user.telegram_id or "")},
@@ -104,31 +106,39 @@ class BillingService:
         if trial_days:
             params["subscription_data"] = {"trial_period_days": trial_days}
 
-        session = stripe.checkout.Session.create(**params)
+        session = await asyncio.to_thread(stripe.checkout.Session.create, **params)
         return session.url
 
     async def create_portal_session(self, user: User, return_url: str) -> str:
         """Create a Stripe Customer Portal session. Returns portal URL."""
         customer_id = await self.ensure_stripe_customer(user)
-        session = stripe.billing_portal.Session.create(
+        session = await asyncio.to_thread(
+            stripe.billing_portal.Session.create,
             customer=customer_id,
             return_url=return_url,
         )
         return session.url
 
     async def handle_checkout_completed(self, data: dict) -> Subscription:
-        """Handle checkout.session.completed webhook event."""
+        """Handle checkout.session.completed webhook event (idempotent)."""
         user_id = uuid.UUID(data["metadata"]["user_id"])
         plan = PlanType(data["metadata"]["plan"])
         stripe_sub_id = data.get("subscription")
 
+        # Idempotency: if this Stripe subscription already exists, skip creation
+        if stripe_sub_id:
+            existing = await self.get_subscription_by_stripe_id(stripe_sub_id)
+            if existing:
+                logger.info("Idempotent skip: subscription %s already exists", stripe_sub_id)
+                return existing
+
         # Deactivate any existing subscriptions
         await self._deactivate_existing_subscriptions(user_id)
 
-        # Retrieve the Stripe subscription to get the price_id
+        # Retrieve the Stripe subscription to get the price_id (run in thread to avoid blocking)
         stripe_price_id = None
         if stripe_sub_id:
-            stripe_sub = stripe.Subscription.retrieve(stripe_sub_id)
+            stripe_sub = await asyncio.to_thread(stripe.Subscription.retrieve, stripe_sub_id)
             if stripe_sub.get("items", {}).get("data"):
                 stripe_price_id = stripe_sub["items"]["data"][0]["price"]["id"]
 

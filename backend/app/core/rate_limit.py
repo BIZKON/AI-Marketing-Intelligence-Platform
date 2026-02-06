@@ -52,11 +52,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         has_auth = "authorization" in request.headers
         max_tokens = AUTH_RATE if has_auth else ANON_RATE
 
-        # Get client identifier (IP or forwarded IP)
+        # Get client identifier from actual connection (ignore X-Forwarded-For to prevent spoofing)
         client_ip = request.client.host if request.client else "unknown"
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            client_ip = forwarded.split(",")[0].strip()
 
         key = f"{client_ip}:{'auth' if has_auth else 'anon'}"
 
