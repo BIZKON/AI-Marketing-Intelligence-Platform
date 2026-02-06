@@ -1,6 +1,7 @@
 """Competitor management handler: add, list, delete competitors via API."""
 
 import logging
+from urllib.parse import urlparse
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -49,8 +50,17 @@ async def process_competitor_name(message: Message, state: FSMContext) -> None:
 
 @router.message(AddCompetitorStates.waiting_url)
 async def process_competitor_url(message: Message, state: FSMContext) -> None:
-    url = None if message.text and message.text.strip() == "/skip" else (message.text or "").strip()
-    await state.update_data(url=url or None)
+    raw = (message.text or "").strip()
+    url = None
+    if raw and raw != "/skip":
+        # Validate URL format (#083)
+        parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            url = parsed.geturl()
+        else:
+            await message.answer("Некорректный URL. Введите правильный адрес или /skip:")
+            return
+    await state.update_data(url=url)
     await state.set_state(AddCompetitorStates.waiting_platforms)
 
     builder = InlineKeyboardBuilder()

@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 
 import httpx
 
+from app.core.config import get_settings
 from app.services.parsers.base import BaseParser, ParsedPost
 
 logger = logging.getLogger(__name__)
 
-VK_ACCESS_TOKEN = os.getenv("VK_ACCESS_TOKEN", "")
+VK_ACCESS_TOKEN = get_settings().vk_access_token
 VK_API_VERSION = "5.199"
 VK_API_BASE = "https://api.vk.com/method"
 

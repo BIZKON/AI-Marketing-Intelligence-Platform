@@ -111,16 +111,29 @@ async def cmd_usage(message: Message, api: APIClient = None, user_plan: str = "m
 
 
 @router.callback_query(lambda c: c.data == "action_setup")
-async def cb_action_setup(callback) -> None:
-    await callback.message.answer(
-        "Используйте команду /setup для настройки профиля бренда."
-    )
+async def cb_action_setup(callback, **kwargs) -> None:
+    """Directly trigger onboarding setup flow (#085)."""
+    from bot.handlers.onboarding import cmd_setup
     await callback.answer()
+    await cmd_setup(callback.message, **kwargs)
 
 
 @router.callback_query(lambda c: c.data == "action_billing")
-async def cb_action_billing(callback) -> None:
-    await callback.message.answer(
-        "Используйте команду /billing для управления подпиской."
-    )
+async def cb_action_billing(callback, api=None, **kwargs) -> None:
+    """Directly show billing info (#085)."""
     await callback.answer()
+    if api:
+        try:
+            sub = await api.get_subscription()
+            plan = sub["plan"] if sub else "monitor"
+            status = sub["status"] if sub else "none"
+            await callback.message.answer(
+                f"<b>Подписка</b>\n\n"
+                f"Тариф: <b>{plan.capitalize()}</b>\n"
+                f"Статус: {status}\n\n"
+                "Для изменения тарифа используйте /billing."
+            )
+        except Exception:
+            await callback.message.answer("Используйте /billing для управления подпиской.")
+    else:
+        await callback.message.answer("Используйте /billing для управления подпиской.")

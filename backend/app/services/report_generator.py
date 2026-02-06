@@ -20,7 +20,6 @@ from app.models.report import Report, ReportType
 from app.models.user import User
 from app.services.agents.analyst import AnalystAgent
 from app.services.agents.marketer import MarketerAgent
-from app.services.agents.sales import SalesAgent
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,6 @@ class ReportGenerator:
         self.db = db
         self.analyst = AnalystAgent()
         self.marketer = MarketerAgent()
-        self.sales = SalesAgent()
 
     # ── Weekly Digest ────────────────────────────────────────────────────────
 

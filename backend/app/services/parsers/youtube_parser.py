@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 
 import httpx
 
+from app.core.config import get_settings
 from app.services.parsers.base import BaseParser, ParsedPost
 
 logger = logging.getLogger(__name__)
 
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+YOUTUBE_API_KEY = get_settings().youtube_api_key
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 

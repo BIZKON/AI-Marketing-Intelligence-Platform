@@ -12,10 +12,6 @@
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "next-auth": "^4.24.0",
-    "recharts": "^2.14.0",
-    "@hello-pangea/dnd": "^17.0.0",
-    "lucide-react": "^0.469.0",
     "clsx": "^2.1.0",
     "tailwind-merge": "^2.6.0"
   },

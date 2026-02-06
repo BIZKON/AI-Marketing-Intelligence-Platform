@@ -52,7 +52,7 @@ class VideoGenerator:
             {"s3_key": "...", "url": "...", "heygen_video_id": "..."}
         """
         # Build speech script (reuse voice generator logic)
-        script = self.voice_gen._build_speech_script(report_content, report_markdown, title)
+        script = self.voice_gen.build_speech_script(report_content, report_markdown, title)
 
         # Pre-render chart images for slides
         chart_images = self._render_chart_slides(report_content)

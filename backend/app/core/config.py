@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     stripe_price_autopilot: str = ""
     stripe_price_enterprise: str = ""
 
+    # YouTube
+    youtube_api_key: str = ""
+
     # AI
     anthropic_api_key: str = ""
     openai_api_key: str = ""

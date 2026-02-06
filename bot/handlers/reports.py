@@ -455,18 +455,51 @@ async def cb_report_media(callback: CallbackQuery, api: APIClient = None, **kwar
 
 
 def _html_escape(text: str) -> str:
-    """Escape HTML special characters for Telegram."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Escape HTML special characters for Telegram (#082)."""
+    return (
+        text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#x27;")
+    )
 
 
 def _split_text(text: str, max_len: int = 4000) -> list[str]:
-    """Split text into chunks at paragraph boundaries."""
+    """Split text into chunks at paragraph boundaries (#084).
+
+    Handles paragraphs that exceed max_len by splitting at word boundaries.
+    """
     if len(text) <= max_len:
         return [text]
 
-    chunks = []
+    def _split_long(paragraph: str) -> list[str]:
+        """Split a single paragraph longer than max_len at word boundaries."""
+        words = paragraph.split(" ")
+        parts: list[str] = []
+        buf = ""
+        for word in words:
+            if buf and len(buf) + 1 + len(word) > max_len:
+                parts.append(buf)
+                buf = word
+            else:
+                buf = buf + " " + word if buf else word
+        if buf:
+            parts.append(buf)
+        return parts
+
+    chunks: list[str] = []
     current = ""
     for paragraph in text.split("\n\n"):
+        # Handle oversized paragraphs
+        if len(paragraph) > max_len:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_split_long(paragraph))
+            continue
+
         if len(current) + len(paragraph) + 2 > max_len:
             if current:
                 chunks.append(current)

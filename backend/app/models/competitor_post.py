@@ -37,7 +37,8 @@ class CompetitorPost(Base):
         UUID(as_uuid=True),
         ForeignKey("competitors.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+        # Redundant single-column index removed (#086) — covered by
+        # ix_competitor_posts_competitor_platform composite index
     )
     platform: Mapped[Platform] = mapped_column(
         Enum(Platform, name="platform_type"),
