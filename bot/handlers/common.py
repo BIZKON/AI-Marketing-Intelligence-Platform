@@ -71,6 +71,12 @@ async def cmd_help(message: Message, user_plan: str = "monitor", **kwargs) -> No
         ])
 
     commands.extend([
+        ("/train", "Тренажёр продаж (AI-клиент)"),
+        ("/mystats", "Статистика тренировок"),
+        ("/battle", "Мультиплеер — соревнование"),
+        ("/level", "Уровень, XP, монеты"),
+        ("/challenge", "Дневной челлендж"),
+        ("/shop", "Магазин наград"),
         ("/usage", "Использование лимитов"),
         ("/billing", "Подписка и биллинг"),
         ("/help", "Эта справка"),

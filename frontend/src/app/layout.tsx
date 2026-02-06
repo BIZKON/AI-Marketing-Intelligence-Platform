@@ -5,6 +5,8 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "AI Marketing Intelligence Platform",
   description: "Competitive intelligence and content automation for marketers",
+  manifest: "/manifest.json",
+  themeColor: "#4f46e5",
 };
 
 function LoadingFallback() {

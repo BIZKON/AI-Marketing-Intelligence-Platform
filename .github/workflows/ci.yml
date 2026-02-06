@@ -86,7 +86,7 @@ jobs:
           pip install fastapi uvicorn pydantic pydantic-settings "pydantic[email]"
           pip install "sqlalchemy[asyncio]" asyncpg alembic greenlet
           pip install "redis[hiredis]" "celery[redis]"
-          pip install aiogram stripe anthropic openai httpx
+          pip install aiogram stripe anthropic openai httpx websockets
           pip install beautifulsoup4 lxml elevenlabs boto3
           pip install python-multipart "python-jose[cryptography]" "passlib[bcrypt]"
           pip install tenacity cachetools
@@ -100,6 +100,8 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           CELERY_BROKER_URL: redis://localhost:6379/1
           CELERY_RESULT_BACKEND: redis://localhost:6379/2
+          ATLAS_CLOUD_API_KEY: ""
+          ATLAS_CLOUD_BASE_URL: https://api.atlascloud.ai/api/v1
         run: >
           pytest backend/tests/ bot/tests/
           -v

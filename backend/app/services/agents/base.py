@@ -1,4 +1,4 @@
-"""Base agent interface with RAG support via Claude API."""
+"""Base agent interface with RAG support via Atlas Cloud API."""
 
 from __future__ import annotations
 
@@ -9,47 +9,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
-from app.core.config import get_settings
+from app.core.atlas_cloud import get_atlas_client, DEFAULT_CHAT_MODEL
 from app.services.vectordb.embeddings import EmbeddingService
 from app.services.vectordb.qdrant_client import QdrantService
 
 logger = logging.getLogger(__name__)
 
-ANTHROPIC_API_KEY = get_settings().anthropic_api_key
-ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
 MAX_TOKENS = 4096
-
-# Simple circuit breaker for external APIs (#050)
-_circuit_state: dict[str, dict] = {}
-CIRCUIT_FAILURE_THRESHOLD = 5
-CIRCUIT_RECOVERY_TIMEOUT = 60  # seconds
-
-
-def _check_circuit(service: str) -> bool:
-    """Return True if the circuit is closed (requests allowed)."""
-    state = _circuit_state.get(service)
-    if not state:
-        return True
-    if state["failures"] < CIRCUIT_FAILURE_THRESHOLD:
-        return True
-    # Circuit is open — check if recovery timeout has passed
-    if time.monotonic() - state["last_failure"] > CIRCUIT_RECOVERY_TIMEOUT:
-        state["failures"] = 0  # half-open → allow one request
-        return True
-    return False
-
-
-def _record_failure(service: str) -> None:
-    state = _circuit_state.setdefault(service, {"failures": 0, "last_failure": 0.0})
-    state["failures"] += 1
-    state["last_failure"] = time.monotonic()
-
-
-def _record_success(service: str) -> None:
-    _circuit_state.pop(service, None)
 
 
 @dataclass
@@ -65,19 +31,21 @@ class AgentResult:
 
 
 class BaseAgent(abc.ABC):
-    """Abstract base class for AI agents with RAG capabilities."""
+    """Abstract base class for AI agents with RAG capabilities.
+
+    Uses Atlas Cloud as the unified AI gateway for all LLM calls.
+    """
 
     def __init__(
         self,
         embedding_service: EmbeddingService | None = None,
         qdrant_service: QdrantService | None = None,
-        api_key: str | None = None,
-        model: str = CLAUDE_MODEL,
+        model: str = DEFAULT_CHAT_MODEL,
     ) -> None:
         self.embeddings = embedding_service or EmbeddingService()
         self.qdrant = qdrant_service or QdrantService()
-        self.api_key = api_key or ANTHROPIC_API_KEY
         self.model = model
+        self.atlas = get_atlas_client()
 
     @property
     @abc.abstractmethod
@@ -109,7 +77,7 @@ class BaseAgent(abc.ABC):
         1. Embed the query
         2. Search Qdrant for relevant content
         3. Build context from results
-        4. Call Claude API with system prompt + context + query
+        4. Call Atlas Cloud API with system prompt + context + query
         """
         # Step 1: Retrieve relevant context via RAG
         context_pieces: list[str] = []
@@ -151,9 +119,9 @@ class BaseAgent(abc.ABC):
 
         context = "\n\n".join(context_pieces) if context_pieces else "No competitor data available."
 
-        # Step 2: Call Claude
+        # Step 2: Call Atlas Cloud
         user_message = self._build_user_message(context, query, **kwargs)
-        result = await self._call_claude(user_message)
+        result = await self._call_llm(user_message)
 
         return AgentResult(
             agent_name=self.agent_name,
@@ -164,71 +132,22 @@ class BaseAgent(abc.ABC):
             model=self.model,
         )
 
-    async def _call_claude(self, user_message: str) -> dict:
-        """Call Claude API with the system prompt and user message.
+    async def _call_llm(self, user_message: str) -> dict:
+        """Call Atlas Cloud API with the system prompt and user message."""
+        result = await self.atlas.chat(
+            messages=[{"role": "user", "content": user_message}],
+            system=self.system_prompt,
+            model=self.model,
+            max_tokens=MAX_TOKENS,
+        )
 
-        Includes circuit breaker to avoid cascading failures (#050).
-        """
-        if not self.api_key:
-            logger.warning("ANTHROPIC_API_KEY not set, returning placeholder")
-            return {
-                "content": "[AI анализ недоступен: API ключ не настроен]",
-                "structured": {},
-                "tokens": 0,
-            }
+        content = result.get("content", "")
+        tokens = result.get("tokens", 0)
 
-        # Circuit breaker check (#050)
-        if not _check_circuit("anthropic"):
-            logger.warning("Circuit breaker OPEN for Anthropic API — skipping call")
-            return {
-                "content": "[AI временно недоступен. Сервис восстановится автоматически.]",
-                "structured": {},
-                "tokens": 0,
-            }
+        # Try to extract structured data from JSON blocks
+        structured = self._extract_json(content)
 
-        try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    ANTHROPIC_API_URL,
-                    headers={
-                        "x-api-key": self.api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "max_tokens": MAX_TOKENS,
-                        "system": self.system_prompt,
-                        "messages": [
-                            {"role": "user", "content": user_message},
-                        ],
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-
-            _record_success("anthropic")
-
-            content_blocks = data.get("content", [])
-            text = "\n".join(
-                block.get("text", "") for block in content_blocks if block.get("type") == "text"
-            )
-            usage = data.get("usage", {})
-            tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-
-            # Try to extract structured data from JSON blocks
-            structured = self._extract_json(text)
-
-            return {"content": text, "structured": structured, "tokens": tokens}
-
-        except Exception:
-            _record_failure("anthropic")
-            logger.exception("Claude API call failed for agent %s", self.agent_name)
-            return {
-                "content": "[Ошибка при вызове AI. Попробуйте позже.]",
-                "structured": {},
-                "tokens": 0,
-            }
+        return {"content": content, "structured": structured, "tokens": tokens}
 
     @staticmethod
     def _format_source(payload: dict, score: float) -> str:
@@ -265,7 +184,6 @@ class BaseAgent(abc.ABC):
     @staticmethod
     def _extract_json(text: str) -> dict:
         """Try to extract a JSON object from the response text."""
-        # Look for ```json ... ``` blocks
         import re
         json_match = re.search(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
         if json_match:

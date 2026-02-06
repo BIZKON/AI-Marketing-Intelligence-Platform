@@ -4,7 +4,11 @@ from collections.abc import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, auth, billing, competitors, content, reports, users
+from app.api.routers import (
+    ab_tests, admin, auth, billing, calls, competitors, content, crm,
+    export, gamification, monitoring, multiplayer, reports, training,
+    users, voice, voip, ws_training,
+)
 from app.core.config import get_settings
 from app.core.rate_limit import RateLimitMiddleware
 
@@ -51,6 +55,17 @@ app.include_router(competitors.router, prefix=f"{settings.api_prefix}/competitor
 app.include_router(reports.router, prefix=f"{settings.api_prefix}/reports", tags=["reports"])
 app.include_router(content.router, prefix=f"{settings.api_prefix}/content", tags=["content"])
 app.include_router(admin.router, prefix=f"{settings.api_prefix}/admin", tags=["admin"])
+app.include_router(training.router, prefix=f"{settings.api_prefix}/training", tags=["training"])
+app.include_router(voice.router, prefix=f"{settings.api_prefix}/voice", tags=["voice"])
+app.include_router(calls.router, prefix=f"{settings.api_prefix}/calls", tags=["calls"])
+app.include_router(ab_tests.router, prefix=f"{settings.api_prefix}/ab-tests", tags=["ab-tests"])
+app.include_router(multiplayer.router, prefix=f"{settings.api_prefix}/multiplayer", tags=["multiplayer"])
+app.include_router(crm.router, prefix=f"{settings.api_prefix}/crm", tags=["crm"])
+app.include_router(voip.router, prefix=f"{settings.api_prefix}/voip", tags=["voip"])
+app.include_router(gamification.router, prefix=f"{settings.api_prefix}/gamification", tags=["gamification"])
+app.include_router(export.router, prefix=f"{settings.api_prefix}/export", tags=["export"])
+app.include_router(monitoring.router, prefix=f"{settings.api_prefix}/monitoring", tags=["monitoring"])
+app.include_router(ws_training.router, tags=["websocket"])
 
 
 @app.get("/health")

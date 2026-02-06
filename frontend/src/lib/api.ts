@@ -82,6 +82,147 @@ export interface CheckoutResponse {
   checkout_url: string;
 }
 
+// Training types
+export interface TrainingScenarioResponse {
+  id: string;
+  title: string;
+  description: string | null;
+  type: string;
+  difficulty: string;
+  client_persona: {
+    name: string;
+    age?: number;
+    mood?: string;
+    background?: string;
+    objections?: string[];
+  };
+  is_public: boolean;
+  tags: string[] | null;
+  created_at: string;
+}
+
+export interface TrainingSessionResponse {
+  id: string;
+  user_id: string;
+  scenario_id: string | null;
+  mode: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  created_at: string;
+}
+
+export interface TrainingMessageResponse {
+  id: string;
+  session_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export interface TrainingEvaluationResponse {
+  id: string;
+  session_id: string;
+  overall_score: number | null;
+  criteria_scores: Record<string, number>;
+  strengths: string[] | null;
+  improvements: string[] | null;
+  detailed_feedback: string | null;
+  mood_analysis: string | null;
+  created_at: string;
+}
+
+export interface SimulateClientResponse {
+  user_message: TrainingMessageResponse;
+  assistant_message: TrainingMessageResponse;
+}
+
+export interface TrainingSessionDetailResponse extends TrainingSessionResponse {
+  messages: TrainingMessageResponse[];
+  evaluation: TrainingEvaluationResponse | null;
+  scenario: TrainingScenarioResponse | null;
+}
+
+export interface TrainingAchievementResponse {
+  id: string;
+  achievement_type: string;
+  metadata_json: Record<string, string> | null;
+  created_at: string;
+}
+
+export interface TrainingAnalyticsResponse {
+  total_sessions: number;
+  completed_sessions: number;
+  avg_score: number | null;
+  best_score: number | null;
+  total_duration_minutes: number;
+  weekly_stats: { week_start: string; sessions_count: number; avg_score: number | null; total_duration_minutes: number }[];
+  criteria_averages: Record<string, number>;
+  recent_sessions: TrainingSessionResponse[];
+  achievements: TrainingAchievementResponse[];
+}
+
+// Gamification types
+export interface GamificationProfileResponse {
+  level: string;
+  xp: number;
+  coins: number;
+  current_streak: number;
+  longest_streak: number;
+  last_active_date: string | null;
+}
+
+export interface DailyChallengeResponse {
+  id: string;
+  type: string;
+  label: string;
+  target: number;
+  progress: number;
+  reward_coins: number;
+  is_completed: boolean;
+}
+
+export interface ShopItemResponse {
+  id: string;
+  name: string;
+  price: number;
+  type: string;
+}
+
+// Monitoring types
+export interface AtlasCloudServiceStatus {
+  status: "closed" | "open";
+  failures: number;
+  threshold: number;
+  seconds_since_last_failure: number | null;
+}
+
+export interface AtlasCloudStatusResponse {
+  overall: "healthy" | "degraded";
+  services: Record<string, AtlasCloudServiceStatus>;
+}
+
+export interface TrainingPlatformStatsResponse {
+  total_sessions: number;
+  completed_sessions: number;
+  in_progress_sessions: number;
+  completion_rate: number;
+  avg_score: number | null;
+  unique_users: number;
+  total_training_hours: number;
+}
+
+// A/B Test types
+export interface ABTestResponse {
+  id: string;
+  name: string;
+  variant_a: string;
+  variant_b: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 // Token management helpers (#057)
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -239,4 +380,79 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ plan }),
     }),
+
+  // Training
+  getScenarios: (token: string) =>
+    apiFetch<TrainingScenarioResponse[]>("/training/scenarios", { token }),
+
+  createTrainingSession: (token: string, scenarioId: string, mode: string = "text") =>
+    apiFetch<TrainingSessionResponse>("/training/sessions", {
+      token,
+      method: "POST",
+      body: JSON.stringify({ scenario_id: scenarioId, mode }),
+    }),
+
+  getTrainingSessions: (token: string, limit: number = 20) =>
+    apiFetch<TrainingSessionResponse[]>(`/training/sessions?limit=${limit}`, { token }),
+
+  getTrainingSession: (token: string, sessionId: string) =>
+    apiFetch<TrainingSessionDetailResponse>(`/training/sessions/${sessionId}`, { token }),
+
+  sendTrainingMessage: (token: string, sessionId: string, message: string) =>
+    apiFetch<SimulateClientResponse>(`/training/sessions/${sessionId}/message`, {
+      token,
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  completeTrainingSession: (token: string, sessionId: string) =>
+    apiFetch<TrainingEvaluationResponse>(`/training/sessions/${sessionId}/complete`, {
+      token,
+      method: "POST",
+    }),
+
+  getTrainingAnalytics: (token: string) =>
+    apiFetch<TrainingAnalyticsResponse>("/training/analytics", { token }),
+
+  getTrainingAchievements: (token: string) =>
+    apiFetch<TrainingAchievementResponse[]>("/training/achievements", { token }),
+
+  // Gamification
+  getGamificationProfile: (token: string) =>
+    apiFetch<GamificationProfileResponse>("/gamification/profile", { token }),
+
+  getDailyChallenges: (token: string) =>
+    apiFetch<DailyChallengeResponse[]>("/gamification/challenges", { token }),
+
+  getShopItems: (token: string) =>
+    apiFetch<ShopItemResponse[]>("/gamification/shop", { token }),
+
+  // A/B Tests
+  getABTests: (token: string) =>
+    apiFetch<ABTestResponse[]>("/ab-tests/", { token }),
+
+  createABTest: (token: string, data: { name: string; variant_a: string; variant_b: string }) =>
+    apiFetch<ABTestResponse>("/ab-tests/", { token, method: "POST", body: JSON.stringify(data) }),
+
+  // Multiplayer
+  createMultiplayerSession: (token: string, scenarioId: string) =>
+    apiFetch<{ id: string; session_code: string; status: string }>("/multiplayer/", {
+      token,
+      method: "POST",
+      body: JSON.stringify({ scenario_id: scenarioId }),
+    }),
+
+  joinMultiplayerSession: (token: string, sessionCode: string) =>
+    apiFetch<{ session_id: string; status: string }>("/multiplayer/join", {
+      token,
+      method: "POST",
+      body: JSON.stringify({ session_code: sessionCode }),
+    }),
+
+  // Monitoring
+  getAtlasCloudStatus: (token: string) =>
+    apiFetch<AtlasCloudStatusResponse>("/monitoring/atlas-cloud/status", { token }),
+
+  getTrainingPlatformStats: (token: string) =>
+    apiFetch<TrainingPlatformStatsResponse>("/monitoring/training/stats", { token }),
 };
