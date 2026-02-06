@@ -223,7 +223,7 @@ async def change_user_plan(
     sub = (await db.execute(
         select(Subscription).where(Subscription.user_id == user.id)
         .order_by(Subscription.created_at.desc())
-    )).scalar_first()
+    )).scalars().first()
 
     if sub:
         sub.plan = plan

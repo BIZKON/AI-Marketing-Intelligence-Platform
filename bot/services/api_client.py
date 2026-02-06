@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -60,12 +63,36 @@ class APIClient:
     # ── Auth ──────────────────────────────────────────────────────────────────
 
     async def auth_telegram(
-        self, telegram_id: int, username: str | None = None, full_name: str | None = None
+        self,
+        telegram_id: int,
+        username: str | None = None,
+        full_name: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
     ) -> dict:
+        auth_date = int(time.time())
+        # Build data-check-string per Telegram Login Widget spec
+        fields: dict[str, str] = {"id": str(telegram_id), "auth_date": str(auth_date)}
+        if first_name:
+            fields["first_name"] = first_name
+        if last_name:
+            fields["last_name"] = last_name
+        if username:
+            fields["username"] = username
+        data_check_string = "\n".join(f"{k}={fields[k]}" for k in sorted(fields))
+
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        secret_key = hashlib.sha256(bot_token.encode()).digest()
+        hash_value = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
         data = await self._request("POST", "/auth/telegram", json={
             "telegram_id": telegram_id,
             "username": username,
             "full_name": full_name,
+            "first_name": first_name or "",
+            "last_name": last_name or "",
+            "auth_date": auth_date,
+            "hash": hash_value,
         })
         self.token = data["access_token"]
         return data
@@ -211,7 +238,7 @@ class APIClient:
             body["is_active"] = is_active
         if is_superuser is not None:
             body["is_superuser"] = is_superuser
-        return await self._request("PATCH", f"/admin/users/{user_id}", params=body)
+        return await self._request("PATCH", f"/admin/users/{user_id}", json=body)
 
     async def admin_change_plan(self, user_id: str, plan: str) -> dict:
         return await self._request("PATCH", f"/admin/users/{user_id}/plan", params={"plan": plan})

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -28,5 +29,26 @@ class CompetitorUpdate(BaseModel):
 class CompetitorResponse(CompetitorBase):
     id: uuid.UUID
     is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class CompetitorPostResponse(BaseModel):
+    id: uuid.UUID
+    competitor_id: uuid.UUID
+    platform: str
+    external_id: str | None = None
+    title: str | None = None
+    text_content: str | None = None
+    url: str | None = None
+    views: int = 0
+    likes: int = 0
+    comments: int = 0
+    shares: int = 0
+    engagement_rate: float | None = None
+    published_at: datetime | None = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}

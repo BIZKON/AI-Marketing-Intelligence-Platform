@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr
 
@@ -20,6 +21,7 @@ class UserUpdate(BaseModel):
     timezone: str | None = None
     language: str | None = None
     brand_name: str | None = None
+    brand_industry: str | None = None
     brand_description: str | None = None
     tone_of_voice: str | None = None
 
@@ -30,5 +32,10 @@ class UserResponse(UserBase):
     telegram_username: str | None = None
     is_active: bool
     brand_name: str | None = None
+    brand_industry: str | None = None
+    brand_description: str | None = None
+    tone_of_voice: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}

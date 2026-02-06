@@ -1,6 +1,67 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { api, ApiError } from "@/lib/api";
+import type { CompetitorResponse, SubscriptionResponse, ContentTaskResponse } from "@/lib/api";
+
+interface DashboardData {
+  competitors: CompetitorResponse[];
+  tasks: ContentTaskResponse[];
+  subscription: SubscriptionResponse | null;
+}
+
 export default function Dashboard() {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    if (!token) {
+      setError("Not authenticated");
+      setLoading(false);
+      return;
+    }
+
+    async function fetchData() {
+      try {
+        const [competitors, tasks, subscription] = await Promise.all([
+          api.getCompetitors(token!).catch(() => [] as CompetitorResponse[]),
+          api.getTasks(token!).catch(() => [] as ContentTaskResponse[]),
+          api.getSubscription(token!).catch(() => null),
+        ]);
+        setData({ competitors, tasks, subscription });
+      } catch (err) {
+        const message = err instanceof ApiError ? err.detail : "Failed to load dashboard";
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-500">Loading...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-red-500">{error}</p>
+      </div>
+    );
+  }
+
+  const competitorCount = data?.competitors.length ?? 0;
+  const taskCount = data?.tasks.length ?? 0;
+  const plan = data?.subscription?.plan ?? "monitor";
+
   return (
     <div className="min-h-screen">
       {/* Header */}
@@ -24,10 +85,10 @@ export default function Dashboard() {
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Stats cards */}
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <StatsCard title="Competitors" value="—" description="Being tracked" />
+          <StatsCard title="Competitors" value={String(competitorCount)} description="Being tracked" />
           <StatsCard title="Reports" value="—" description="This month" />
-          <StatsCard title="Content Tasks" value="—" description="In pipeline" />
-          <StatsCard title="Plan" value="—" description="Current subscription" />
+          <StatsCard title="Content Tasks" value={String(taskCount)} description="In pipeline" />
+          <StatsCard title="Plan" value={plan.charAt(0).toUpperCase() + plan.slice(1)} description="Current subscription" />
         </div>
 
         {/* Placeholder sections */}

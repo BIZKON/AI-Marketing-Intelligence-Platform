@@ -1,13 +1,15 @@
 """Reports API — digests, alerts, PDF, voice, video generation."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, require_plan
+from app.core.dependencies import get_active_subscription, get_current_user, require_plan
+from app.core.limits import get_plan_limits
 from app.models.report import Report, ReportType
 from app.models.subscription import PlanType, Subscription
 from app.models.user import User
@@ -74,7 +76,6 @@ async def request_digest(
     generator = ReportGenerator(db)
     comp_ids = [str(c) for c in (body.competitor_ids or [])] or None
     report = await generator.generate_digest(user, competitor_ids=comp_ids)
-    await db.commit()
     return report
 
 
@@ -109,7 +110,6 @@ async def generate_pdf(
     pdf_url = await s3.get_presigned_url(s3_key, expires_in=86400)
 
     report.media_url = pdf_url
-    await db.commit()
 
     return {
         "report_id": report.id,
@@ -125,11 +125,34 @@ async def generate_pdf(
 async def request_voice_report(
     body: VoiceReportRequest,
     user: User = Depends(get_current_user),
+    subscription: Subscription = Depends(get_active_subscription),
     _sub: Subscription = Depends(require_plan(PlanType.CREATOR)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Queue voice report generation via Celery (returns immediately)."""
     from app.workers.tasks import generate_voice_report
+
+    # Check weekly voice report limit
+    limits = get_plan_limits(subscription.plan)
+    if limits.voice_per_week > 0:
+        week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        voice_count = (await db.execute(
+            select(func.count()).where(
+                Report.user_id == user.id,
+                Report.type == ReportType.VOICE,
+                Report.created_at >= week_ago,
+            )
+        )).scalar() or 0
+        if voice_count >= limits.voice_per_week:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Weekly voice report limit reached ({limits.voice_per_week}). Try again next week.",
+            )
+    elif limits.voice_per_week == 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Voice reports are not available on your plan. Upgrade to Creator or higher.",
+        )
 
     report = await _get_user_report(db, body.report_id, user.id)
 
@@ -146,7 +169,7 @@ async def request_voice_report(
         content={"source_report_id": str(report.id), "status": "generating"},
     )
     db.add(voice_report)
-    await db.commit()
+    await db.flush()
 
     generate_voice_report.delay(str(voice_report.id), str(report.id))
 
@@ -165,11 +188,34 @@ async def request_voice_report(
 async def request_video_report(
     body: VideoReportRequest,
     user: User = Depends(get_current_user),
+    subscription: Subscription = Depends(get_active_subscription),
     _sub: Subscription = Depends(require_plan(PlanType.AUTOPILOT)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Queue video report generation via Celery (returns immediately)."""
     from app.workers.tasks import generate_video_report
+
+    # Check weekly video report limit
+    limits = get_plan_limits(subscription.plan)
+    if limits.video_per_week > 0:
+        week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        video_count = (await db.execute(
+            select(func.count()).where(
+                Report.user_id == user.id,
+                Report.type == ReportType.VIDEO,
+                Report.created_at >= week_ago,
+            )
+        )).scalar() or 0
+        if video_count >= limits.video_per_week:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Weekly video report limit reached ({limits.video_per_week}). Try again next week.",
+            )
+    elif limits.video_per_week == 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Video reports are not available on your plan. Upgrade to Autopilot or higher.",
+        )
 
     report = await _get_user_report(db, body.report_id, user.id)
 
@@ -186,7 +232,7 @@ async def request_video_report(
         content={"source_report_id": str(report.id), "status": "generating"},
     )
     db.add(video_report)
-    await db.commit()
+    await db.flush()
 
     generate_video_report.delay(str(video_report.id), str(report.id))
 

@@ -14,13 +14,14 @@ from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message
+from cachetools import TTLCache
 
 from bot.services.api_client import APIClient
 
 logger = logging.getLogger(__name__)
 
-# In-memory cache: telegram_id -> (token, user_dict)
-_auth_cache: dict[int, tuple[str, dict]] = {}
+# TTL cache: entries expire after 20 minutes (before 24h JWT expiry), max 10k users
+_auth_cache: TTLCache[int, tuple[str, dict]] = TTLCache(maxsize=10000, ttl=1200)
 
 
 class AuthMiddleware(BaseMiddleware):
@@ -38,6 +39,8 @@ class AuthMiddleware(BaseMiddleware):
         telegram_id = event.from_user.id
         telegram_username = event.from_user.username
         full_name = event.from_user.full_name
+        first_name = event.from_user.first_name
+        last_name = event.from_user.last_name or ""
 
         # Try cache first
         cached = _auth_cache.get(telegram_id)
@@ -51,6 +54,8 @@ class AuthMiddleware(BaseMiddleware):
                     telegram_id=telegram_id,
                     username=telegram_username,
                     full_name=full_name,
+                    first_name=first_name,
+                    last_name=last_name,
                 )
                 user_data = auth_response["user"]
                 _auth_cache[telegram_id] = (auth_response["access_token"], user_data)

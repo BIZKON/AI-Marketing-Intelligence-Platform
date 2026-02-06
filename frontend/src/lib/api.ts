@@ -1,7 +1,84 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
+export class ApiError extends Error {
+  status: number;
+  detail: string;
+
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 interface FetchOptions extends RequestInit {
   token?: string;
+}
+
+// Response types
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  is_new_user: boolean;
+  user: UserResponse;
+}
+
+export interface UserResponse {
+  id: string;
+  email: string;
+  full_name: string | null;
+  telegram_id: number | null;
+  brand_name: string | null;
+  brand_industry: string | null;
+  brand_description: string | null;
+  tone_of_voice: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface CompetitorResponse {
+  id: string;
+  name: string;
+  url: string | null;
+  platforms: string[];
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface ReportResponse {
+  id: string;
+  report_type: string;
+  status: string;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface ContentPlanResponse {
+  id: string;
+  period: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ContentTaskResponse {
+  id: string;
+  content_type: string;
+  status: string;
+  title: string | null;
+  draft_text: string | null;
+  created_at: string;
+}
+
+export interface SubscriptionResponse {
+  plan: string;
+  status: string;
+  current_period_end: string | null;
+}
+
+export interface CheckoutResponse {
+  checkout_url: string;
 }
 
 async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
@@ -18,7 +95,7 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ detail: "Unknown error" }));
-    throw new Error(error.detail || `HTTP ${res.status}`);
+    throw new ApiError(res.status, error.detail || `HTTP ${res.status}`);
   }
 
   return res.json();
@@ -27,48 +104,48 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
 export const api = {
   // Auth
   login: (email: string, password: string) =>
-    apiFetch<{ access_token: string }>("/auth/login", {
+    apiFetch<AuthResponse>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
 
   register: (email: string, password: string, fullName?: string) =>
-    apiFetch<{ access_token: string }>("/auth/register", {
+    apiFetch<AuthResponse>("/auth/register", {
       method: "POST",
       body: JSON.stringify({ email, password, full_name: fullName }),
     }),
 
   // Users
   getMe: (token: string) =>
-    apiFetch("/users/me", { token }),
+    apiFetch<UserResponse>("/users/me", { token }),
 
   // Competitors
   getCompetitors: (token: string) =>
-    apiFetch("/competitors/", { token }),
+    apiFetch<CompetitorResponse[]>("/competitors/", { token }),
 
   createCompetitor: (token: string, data: { name: string; url?: string; platforms?: string[] }) =>
-    apiFetch("/competitors/", { token, method: "POST", body: JSON.stringify(data) }),
+    apiFetch<CompetitorResponse>("/competitors/", { token, method: "POST", body: JSON.stringify(data) }),
 
   // Reports
   getReports: (token: string, type?: string) =>
-    apiFetch(`/reports/${type ? `?report_type=${type}` : ""}`, { token }),
+    apiFetch<ReportResponse[]>(`/reports/${type ? `?report_type=${type}` : ""}`, { token }),
 
   requestDigest: (token: string) =>
-    apiFetch("/reports/digest", { token, method: "POST", body: JSON.stringify({}) }),
+    apiFetch<ReportResponse>("/reports/digest", { token, method: "POST", body: JSON.stringify({}) }),
 
   // Content
   getPlans: (token: string) =>
-    apiFetch("/content/plans", { token }),
+    apiFetch<ContentPlanResponse[]>("/content/plans", { token }),
 
   getTasks: (token: string) =>
-    apiFetch("/content/tasks", { token }),
+    apiFetch<ContentTaskResponse[]>("/content/tasks", { token }),
 
   // Billing
   getSubscription: (token: string) =>
-    apiFetch("/billing/subscription", { token }),
+    apiFetch<SubscriptionResponse>("/billing/subscription", { token }),
 
   createCheckout: (token: string, plan: string) =>
-    apiFetch<{ checkout_url: string }>("/billing/checkout", {
+    apiFetch<CheckoutResponse>("/billing/checkout", {
       token,
       method: "POST",
       body: JSON.stringify({ plan }),

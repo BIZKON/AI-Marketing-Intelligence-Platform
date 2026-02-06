@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +15,21 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "AI-Marketing-Platform"
     app_env: str = "development"
-    debug: bool = True
-    secret_key: str = "change-me-in-production"
+    debug: bool = False
+    secret_key: str
     api_prefix: str = "/api/v1"
+    cors_origins: str = "http://localhost:3000"
+
+    @model_validator(mode="after")
+    def _validate_secret_key(self) -> "Settings":
+        if self.secret_key in ("change-me-in-production", ""):
+            raise ValueError(
+                "SECRET_KEY must be set to a secure random value. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+            )
+        if len(self.secret_key) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters long")
+        return self
 
     # Database
     database_url: str = "postgresql+asyncpg://platform:platform@localhost:5432/marketing_platform"

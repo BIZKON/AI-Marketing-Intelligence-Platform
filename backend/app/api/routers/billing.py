@@ -40,7 +40,7 @@ async def get_subscription(
         "id": sub.id,
         "plan": sub.plan,
         "status": sub.status,
-        "stripe_subscription_id": sub.stripe_subscription_id,
+        "stripe_subscription_id": None,  # Don't leak internal Stripe IDs to client
         "plan_display": svc.get_plan_display_name(sub.plan),
         "can_upgrade": sub.plan != PlanType.ENTERPRISE,
     }
@@ -62,7 +62,7 @@ async def create_checkout(
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error("Stripe error creating checkout: %s", e)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Payment service error")
 
@@ -81,7 +81,7 @@ async def create_portal(
             user=user,
             return_url=f"{settings.telegram_webhook_url}/billing",
         )
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error("Stripe error creating portal: %s", e)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Payment service error")
 
@@ -97,7 +97,7 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)) -
         event = stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
-    except stripe.error.SignatureVerificationError:
+    except stripe.SignatureVerificationError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid signature")
 
     event_type = event["type"]

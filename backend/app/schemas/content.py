@@ -45,8 +45,10 @@ class ContentTaskUpdate(BaseModel):
     title: str | None = None
     body: str | None = None
     platform: str | None = None
+    content_type: str | None = None
     status: TaskStatus | None = None
     scheduled_at: datetime | None = None
+    metadata_json: dict[str, Any] | None = None
 
 
 class ContentTaskResponse(BaseModel):
@@ -88,8 +90,6 @@ class GenerateResponse(BaseModel):
     task_id: uuid.UUID
     status: str
     body_preview: str | None = None
-
-    model_config = {"from_attributes": True}
 
 
 class BulkGenerateResponse(BaseModel):

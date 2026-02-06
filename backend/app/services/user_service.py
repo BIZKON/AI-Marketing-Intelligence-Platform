@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import time
 import uuid
 
 from sqlalchemy import select
@@ -75,18 +76,26 @@ class UserService:
     ) -> tuple[User, str, bool]:
         """Authenticate via Telegram. Returns (user, access_token, is_new_user).
 
-        If hash_value and auth_date are provided, validates Telegram data integrity.
+        Hash verification is mandatory — requests without hash/auth_date are rejected.
         """
-        if hash_value and auth_date and settings.telegram_bot_token:
-            self._verify_telegram_hash(
-                telegram_id=telegram_id,
-                username=username,
-                first_name=extra_fields.get("first_name"),
-                last_name=extra_fields.get("last_name"),
-                photo_url=extra_fields.get("photo_url"),
-                auth_date=auth_date,
-                hash_value=hash_value,
-            )
+        if not hash_value or not auth_date:
+            raise ValueError("Telegram authentication requires hash and auth_date")
+        if not settings.telegram_bot_token:
+            raise ValueError("Telegram bot token is not configured")
+
+        # Reject stale auth data (older than 5 minutes)
+        if abs(time.time() - auth_date) > 300:
+            raise ValueError("Telegram authentication data is expired")
+
+        self._verify_telegram_hash(
+            telegram_id=telegram_id,
+            username=username,
+            first_name=extra_fields.get("first_name"),
+            last_name=extra_fields.get("last_name"),
+            photo_url=extra_fields.get("photo_url"),
+            auth_date=auth_date,
+            hash_value=hash_value,
+        )
 
         user = await self.get_by_telegram_id(telegram_id)
         is_new = user is None

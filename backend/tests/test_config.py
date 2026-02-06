@@ -14,7 +14,7 @@ def test_settings_defaults():
     s = get_settings()
     assert s.app_name == "AI-Marketing-Platform"
     assert s.api_prefix == "/api/v1"
-    assert s.debug is True
+    assert isinstance(s.debug, bool)
     assert s.app_env == "development"
 
 

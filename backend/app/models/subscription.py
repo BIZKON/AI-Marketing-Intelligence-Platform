@@ -4,7 +4,9 @@ import enum
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +51,7 @@ class Subscription(Base):
     )
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     stripe_price_id: Mapped[str | None] = mapped_column(String(255))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     user: Mapped[User] = relationship(back_populates="subscriptions")

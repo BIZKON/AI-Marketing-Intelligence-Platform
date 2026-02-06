@@ -12,4 +12,8 @@ RUN pip install --no-cache-dir -e .
 COPY backend/ backend/
 COPY bot/ bot/
 
+# Create non-root user
+RUN useradd --create-home appuser
+USER appuser
+
 CMD ["python", "-m", "bot.main"]
