@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, auth, billing, competitors, content, reports, users
+from app.api.routers import admin, auth, billing, competitors, content, reports, training, users
 from app.core.config import get_settings
 from app.core.rate_limit import RateLimitMiddleware
 
@@ -51,6 +51,7 @@ app.include_router(competitors.router, prefix=f"{settings.api_prefix}/competitor
 app.include_router(reports.router, prefix=f"{settings.api_prefix}/reports", tags=["reports"])
 app.include_router(content.router, prefix=f"{settings.api_prefix}/content", tags=["content"])
 app.include_router(admin.router, prefix=f"{settings.api_prefix}/admin", tags=["admin"])
+app.include_router(training.router, prefix=f"{settings.api_prefix}/training", tags=["training"])
 
 
 @app.get("/health")

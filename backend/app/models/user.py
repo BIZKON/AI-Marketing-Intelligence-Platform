@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from app.models.content_task import ContentTask
     from app.models.report import Report
     from app.models.subscription import Subscription
+    from app.models.training_session import TrainingSession
+    from app.models.training_achievement import TrainingAchievement
 
 
 class User(Base):
@@ -49,6 +51,10 @@ class User(Base):
     reports: Mapped[list[Report]] = relationship(back_populates="user", cascade="all, delete-orphan")
     content_plans: Mapped[list[ContentPlan]] = relationship(back_populates="user", cascade="all, delete-orphan")
     content_tasks: Mapped[list[ContentTask]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+    # Training relationships
+    training_sessions: Mapped[list[TrainingSession]] = relationship(cascade="all, delete-orphan")
+    training_achievements: Mapped[list[TrainingAchievement]] = relationship(cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User {self.id} tg={self.telegram_id}>"

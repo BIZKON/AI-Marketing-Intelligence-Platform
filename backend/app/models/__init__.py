@@ -6,6 +6,12 @@ from app.models.report import Report
 from app.models.content_plan import ContentPlan
 from app.models.content_task import ContentTask
 from app.models.competitor_post import CompetitorPost
+from app.models.training_scenario import TrainingScenario
+from app.models.training_session import TrainingSession
+from app.models.session_message import SessionMessage
+from app.models.session_evaluation import SessionEvaluation
+from app.models.training_achievement import TrainingAchievement
+from app.models.weekly_training_stats import WeeklyTrainingStats
 
 __all__ = [
     "Base",
@@ -16,4 +22,10 @@ __all__ = [
     "Report",
     "ContentPlan",
     "ContentTask",
+    "TrainingScenario",
+    "TrainingSession",
+    "SessionMessage",
+    "SessionEvaluation",
+    "TrainingAchievement",
+    "WeeklyTrainingStats",
 ]

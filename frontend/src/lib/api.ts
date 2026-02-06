@@ -82,6 +82,87 @@ export interface CheckoutResponse {
   checkout_url: string;
 }
 
+// Training types
+export interface TrainingScenarioResponse {
+  id: string;
+  title: string;
+  description: string | null;
+  type: string;
+  difficulty: string;
+  client_persona: {
+    name: string;
+    age?: number;
+    mood?: string;
+    background?: string;
+    objections?: string[];
+  };
+  is_public: boolean;
+  tags: string[] | null;
+  created_at: string;
+}
+
+export interface TrainingSessionResponse {
+  id: string;
+  user_id: string;
+  scenario_id: string | null;
+  mode: string;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  created_at: string;
+}
+
+export interface TrainingMessageResponse {
+  id: string;
+  session_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export interface TrainingEvaluationResponse {
+  id: string;
+  session_id: string;
+  overall_score: number | null;
+  criteria_scores: Record<string, number>;
+  strengths: string[] | null;
+  improvements: string[] | null;
+  detailed_feedback: string | null;
+  mood_analysis: string | null;
+  created_at: string;
+}
+
+export interface SimulateClientResponse {
+  user_message: TrainingMessageResponse;
+  assistant_message: TrainingMessageResponse;
+}
+
+export interface TrainingSessionDetailResponse extends TrainingSessionResponse {
+  messages: TrainingMessageResponse[];
+  evaluation: TrainingEvaluationResponse | null;
+  scenario: TrainingScenarioResponse | null;
+}
+
+export interface TrainingAchievementResponse {
+  id: string;
+  achievement_type: string;
+  metadata_json: Record<string, string> | null;
+  created_at: string;
+}
+
+export interface TrainingAnalyticsResponse {
+  total_sessions: number;
+  completed_sessions: number;
+  avg_score: number | null;
+  best_score: number | null;
+  total_duration_minutes: number;
+  weekly_stats: { week_start: string; sessions_count: number; avg_score: number | null; total_duration_minutes: number }[];
+  criteria_averages: Record<string, number>;
+  recent_sessions: TrainingSessionResponse[];
+  achievements: TrainingAchievementResponse[];
+}
+
 // Token management helpers (#057)
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -239,4 +320,40 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ plan }),
     }),
+
+  // Training
+  getScenarios: (token: string) =>
+    apiFetch<TrainingScenarioResponse[]>("/training/scenarios", { token }),
+
+  createTrainingSession: (token: string, scenarioId: string, mode: string = "text") =>
+    apiFetch<TrainingSessionResponse>("/training/sessions", {
+      token,
+      method: "POST",
+      body: JSON.stringify({ scenario_id: scenarioId, mode }),
+    }),
+
+  getTrainingSessions: (token: string, limit: number = 20) =>
+    apiFetch<TrainingSessionResponse[]>(`/training/sessions?limit=${limit}`, { token }),
+
+  getTrainingSession: (token: string, sessionId: string) =>
+    apiFetch<TrainingSessionDetailResponse>(`/training/sessions/${sessionId}`, { token }),
+
+  sendTrainingMessage: (token: string, sessionId: string, message: string) =>
+    apiFetch<SimulateClientResponse>(`/training/sessions/${sessionId}/message`, {
+      token,
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  completeTrainingSession: (token: string, sessionId: string) =>
+    apiFetch<TrainingEvaluationResponse>(`/training/sessions/${sessionId}/complete`, {
+      token,
+      method: "POST",
+    }),
+
+  getTrainingAnalytics: (token: string) =>
+    apiFetch<TrainingAnalyticsResponse>("/training/analytics", { token }),
+
+  getTrainingAchievements: (token: string) =>
+    apiFetch<TrainingAchievementResponse[]>("/training/achievements", { token }),
 };

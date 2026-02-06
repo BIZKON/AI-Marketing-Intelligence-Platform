@@ -79,6 +79,7 @@ export default function Dashboard() {
               <Link href="/dashboard/competitors" className="text-sm font-medium text-gray-500 hover:text-gray-700">Competitors</Link>
               <Link href="/dashboard/content" className="text-sm font-medium text-gray-500 hover:text-gray-700">Content</Link>
               <Link href="/dashboard/reports" className="text-sm font-medium text-gray-500 hover:text-gray-700">Reports</Link>
+              <Link href="/training" className="text-sm font-medium text-gray-500 hover:text-gray-700">Training</Link>
             </nav>
           </div>
         </div>

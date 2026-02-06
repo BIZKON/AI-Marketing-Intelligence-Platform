@@ -8,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.handlers import admin, common, competitors, content, onboarding, reports
+from bot.handlers import admin, common, competitors, content, onboarding, reports, training
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.rate_limit import RateLimitMiddleware
 from bot.middlewares.subscription import SubscriptionMiddleware
@@ -64,6 +64,7 @@ async def main() -> None:
     dp.include_router(competitors.router)
     dp.include_router(reports.router)
     dp.include_router(content.router)
+    dp.include_router(training.router)
     dp.include_router(admin.router)
 
     logger.info("Starting bot...")

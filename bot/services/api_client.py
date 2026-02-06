@@ -246,6 +246,31 @@ class APIClient:
     async def admin_change_plan(self, user_id: str, plan: str) -> dict:
         return await self._request("PATCH", f"/admin/users/{user_id}/plan", params={"plan": plan})
 
+    # ── Training ──────────────────────────────────────────────────────────
+
+    async def list_training_scenarios(self) -> list[dict]:
+        return await self._request("GET", "/training/scenarios")
+
+    async def create_training_session(self, scenario_id: str, mode: str = "text") -> dict:
+        return await self._request("POST", "/training/sessions", json={
+            "scenario_id": scenario_id,
+            "mode": mode,
+        })
+
+    async def send_training_message(self, session_id: str, message: str) -> dict:
+        return await self._request("POST", f"/training/sessions/{session_id}/message", json={
+            "message": message,
+        })
+
+    async def complete_training_session(self, session_id: str) -> dict:
+        return await self._request("POST", f"/training/sessions/{session_id}/complete")
+
+    async def get_training_analytics(self) -> dict:
+        return await self._request("GET", "/training/analytics")
+
+    async def get_training_session(self, session_id: str) -> dict:
+        return await self._request("GET", f"/training/sessions/{session_id}")
+
     async def admin_health(self) -> dict:
         """Fetch system health from the /health/detailed endpoint (not under API prefix)."""
         client = await get_client()
