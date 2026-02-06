@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import (
     ab_tests, admin, auth, billing, calls, competitors, content, crm,
-    export, gamification, multiplayer, reports, training, users, voice, voip,
+    export, gamification, monitoring, multiplayer, reports, training,
+    users, voice, voip, ws_training,
 )
 from app.core.config import get_settings
 from app.core.rate_limit import RateLimitMiddleware
@@ -63,6 +64,8 @@ app.include_router(crm.router, prefix=f"{settings.api_prefix}/crm", tags=["crm"]
 app.include_router(voip.router, prefix=f"{settings.api_prefix}/voip", tags=["voip"])
 app.include_router(gamification.router, prefix=f"{settings.api_prefix}/gamification", tags=["gamification"])
 app.include_router(export.router, prefix=f"{settings.api_prefix}/export", tags=["export"])
+app.include_router(monitoring.router, prefix=f"{settings.api_prefix}/monitoring", tags=["monitoring"])
+app.include_router(ws_training.router, tags=["websocket"])
 
 
 @app.get("/health")
