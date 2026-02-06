@@ -108,7 +108,7 @@
 |---|-------|-----------|------------------------|
 | 11.1 | **SEO Pipeline Orchestrator** | HIGH | `seo_pipeline.py` — мастер-оркестратор. WF1 Brain (Investigator→Architect→Validator), WF2 Hook (Journalist→ArtDirector), WF3 Body Loop (Writer→Editor→Structurer), WF4 Assembly (Conclusion+FAQ+Author), WF5 Publisher (WordPress + revalidation). Зависит от 10.2 AgentOrchestrator |
 | 11.2 | **Blog API Router** | HIGH | Новый роутер `/api/v1/blog/`. CRUD для BlogPost, категории, теги, fulltext + Qdrant семантический поиск. Зависит от 10.1 моделей |
-| 11.3 | **SEO Pipeline Celery Tasks** | MEDIUM | Celery chain: brain→hook→body→assembly→publish. Альтернатива N8N (Phase 13) для тех, кто не хочет внешние зависимости |
+| 11.3 | **SEO Pipeline Celery Tasks** | HIGH | Celery chain/chord/group: brain→hook→body→assembly→publish→index. WorkflowEngine для управления пайплайнами, WorkflowRun/WorkflowStepLog модели для трекинга, SSE для real-time статуса |
 
 ### Phase 12: SEO Frontend (Next.js Blog)
 
@@ -118,13 +118,14 @@
 | 12.2 | **SEO Components** | HIGH | Schema.org (Article, FAQ, Breadcrumb), dynamic meta tags, sitemap.xml, robots.txt, Table of Contents, Breadcrumbs |
 | 12.3 | **UX Blog Components** | MEDIUM | AuthorBox, RelatedPosts (Qdrant similarity), FAQBlock с аккордеоном, ShareButtons, ReadingProgress bar |
 
-### Phase 13: N8N + Google Sheets автоматизация
+### Phase 13: Google Sheets + Workflow автоматизация
 
 | # | Фича | Приоритет | Конфликты / Зависимости |
 |---|-------|-----------|------------------------|
-| 13.1 | **N8N инфраструктура** | MEDIUM | Добавить N8N в docker-compose.yml, Nginx reverse proxy, webhook endpoints в FastAPI, auth N8N→Backend |
-| 13.2 | **Google Sheets интеграция** | MEDIUM | `google_sheets_sync.py`, CONVEYOR/PUBLISHED/SETTINGS листы. Trigger: New Row → Pipeline Start. Нужен `GOOGLE_SHEETS_CREDENTIALS_JSON` |
-| 13.3 | **N8N Workflows (7+1)** | MEDIUM | WF0 Master, WF1-4 Content Pipeline, WF5 Publisher, WF6 Indexer (Google/Yandex IndexNow), WF7 Image Gen. Зависит от Phase 11 SEO Pipeline |
+| 13.1 | **WorkflowEngine + модели трекинга** | HIGH | `workflow_engine.py` — управление пайплайнами. Модели `WorkflowRun` + `WorkflowStepLog` (Alembic миграция). Redis pub/sub для real-time статусов. SSE endpoint `/api/v1/workflows/{id}/stream` |
+| 13.2 | **Google Sheets интеграция** | MEDIUM | `google_sheets_sync.py` (gspread), CONVEYOR/PUBLISHED/SETTINGS листы. Celery Beat polling каждые 5 мин. Redis distributed lock для дедупликации. Нужен `GOOGLE_SHEETS_CREDENTIALS_JSON` |
+| 13.3 | **Workflow API Router** | MEDIUM | `/api/v1/workflows/` — start, status, stream (SSE), cancel, retry, logs. Зависит от 13.1 WorkflowEngine |
+| 13.4 | **Celery SEO Worker** | MEDIUM | Отдельный Celery worker на очередях `seo` + `sheets` (тот же Docker image, другая команда). Не блокирует основной worker парсинга/дайджестов |
 
 ### Phase 14: Качество и мониторинг SEO
 
@@ -239,10 +240,11 @@ Phase 7 (Smart-аналитика)
 ├── 7.4 Content Performance Tracking
 └── 7.5 Smart Scheduling
 
-Phase 13 (N8N + Google Sheets)
-├── 13.1 N8N инфраструктура
-├── 13.2 Google Sheets интеграция
-└── 13.3 N8N Workflows (7+1)
+Phase 13 (Google Sheets + Workflow автоматизация)
+├── 13.1 WorkflowEngine + модели трекинга
+├── 13.2 Google Sheets интеграция (Celery Beat polling)
+├── 13.3 Workflow API Router + SSE
+└── 13.4 Celery SEO Worker (выделенная очередь)
 
 Phase 8 (Интеграции)
 ├── 8.1 YouTube auto-publish
@@ -290,9 +292,10 @@ Phase 9 (Масштабирование)               ← ПОСЛЕДНЯЯ (�
 12.1 Blog Pages ──── зависит от ── 11.2 (API)
 12.2 SEO Components ── зависит от ── 12.1
 12.3 UX Components ── зависит от ── 12.1
-13.1 N8N ──────────── зависит от ── docker-compose (расширение)
-13.2 Google Sheets ── зависит от ── 13.1
-13.3 N8N Workflows ── зависит от ── 11.1 + 13.1 + 13.2
+13.1 WorkflowEngine ── зависит от ── Redis (есть) + PostgreSQL (новые модели)
+13.2 Google Sheets ── зависит от ── Celery Beat (есть) + gspread
+13.3 Workflow API ──── зависит от ── 13.1 + FastAPI (есть)
+13.4 Celery SEO Worker ── зависит от ── celery_app.py (расширение очередей)
 14.1 Quality Checks ── зависит от ── 11.1 (pipeline)
 14.2 Индексация ──── зависит от ── 12.1 (blog должен быть live)
 
@@ -300,6 +303,6 @@ Phase 9 (Масштабирование)               ← ПОСЛЕДНЯЯ (�
 Phase 6.3-6.6 Dashboard ←→ Phase 12 Blog (общие UI компоненты)
 Phase 7.1 Trends ──────────→ Phase 11 (тренды для тем статей)
 Phase 7.2 Sentiment ───────→ Phase 11 EditorAgent (тональность)
-Phase 8.2 Notifications ───→ Phase 13 N8N (уведомления о статьях)
+Phase 8.2 Notifications ───→ Phase 13 WorkflowEngine (уведомления о статьях)
 Phase 9.1 Teams ───────────→ BlogPost.user_id → organization_id
 ```

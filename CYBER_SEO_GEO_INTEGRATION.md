@@ -6,7 +6,7 @@
 Автоматизированная система создания SEO/GEO-оптимизированных статей с конвейерным
 производством контента. Включает:
 - **12 AI-агентов** с мультиагентной оркестрацией
-- **7+1 N8N воркфлоу** для управления конвейером
+- **7+1 Celery Workflow** для управления конвейером (chain/chord/group)
 - **WordPress Headless CMS** как бэкенд для контента
 - **Next.js SEO-фронтенд** для блога
 - **Google Sheets** как очередь задач и трекер
@@ -21,57 +21,72 @@
 | Генерация контента | `ContentGenerator` + `MarketerAgent` | **70%** — нужны SEO-промпты |
 | Публикация | `PublisherService` (Telegram/VK) | **30%** — нужен WordPress publisher |
 | Next.js фронтенд | Scaffold dashboard (Next.js 15) | **50%** — нужны SEO-страницы блога |
-| Фоновые задачи | Celery + Redis + Beat | **80%** — гибридная схема |
+| Фоновые задачи | Celery + Redis + Beat | **90%** — расширить chains/chords для SEO pipeline |
 | Хранение файлов | MinIO (S3) | **95%** — готово для изображений |
 | Embeddings/RAG | Qdrant + OpenAI embeddings | **85%** — можно для перелинковки |
 | PostgreSQL | Async SQLAlchemy + JSONB | **95%** — нужны новые модели |
-| Docker инфраструктура | docker-compose с 9 сервисами | **90%** — добавить N8N контейнер |
+| Docker инфраструктура | docker-compose с 9 сервисами | **95%** — добавить Celery SEO Worker (тот же image) |
 
 ---
 
-## 2. Архитектурное решение: Гибридный подход
+## 2. Архитектурное решение: Единый Celery-native подход
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              AI Marketing Intelligence Platform          │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│   ┌─────────────────┐    ┌───────────────────────────┐  │
-│   │ Existing Celery  │    │  NEW: N8N Orchestrator    │  │
-│   │ ─────────────── │    │  ─────────────────────── │  │
-│   │ • Data parsing   │    │  • 7+1 SEO/GEO workflows │  │
-│   │ • Weekly digests │    │  • Google Sheets trigger  │  │
-│   │ • Auto-publish   │    │  • Multi-agent pipeline   │  │
-│   │ • Voice/Video    │    │  • Image generation       │  │
-│   └───────┬─────────┘    └──────────┬────────────────┘  │
-│           │                         │                    │
-│   ┌───────┴─────────────────────────┴────────────────┐  │
-│   │            FastAPI Backend (Unified)               │  │
-│   │  • Workflow Router (/api/v1/workflows/)            │  │
-│   │  • Blog Router (/api/v1/blog/)                     │  │
-│   │  • Existing routers (auth, billing, content...)    │  │
-│   │  • 12+ AI Agents (BaseAgent + Orchestrator)        │  │
-│   └───────┬──────────────────────────┬───────────────┘  │
-│           │                          │                   │
-│   ┌───────┴──────────┐    ┌─────────┴────────────────┐  │
-│   │ PostgreSQL + Redis│    │ WordPress Headless CMS   │  │
-│   │ Qdrant + MinIO   │    │ (External or Docker)     │  │
-│   └──────────────────┘    └──────────────────────────┘  │
-│                                                         │
-│   ┌─────────────────────────────────────────────────┐   │
-│   │         Next.js 15 Frontend                      │   │
-│   │  • /dashboard/* (существующий)                   │   │
-│   │  • /blog/* (NEW: SEO-оптимизированный блог)      │   │
-│   │  • Sitemap, robots.txt, Schema.org               │   │
-│   └─────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                AI Marketing Intelligence Platform                 │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   ┌──────────────────────┐    ┌────────────────────────────────┐ │
+│   │  Celery Worker        │    │  Celery Worker SEO             │ │
+│   │  (default queue)      │    │  (seo + sheets queues)         │ │
+│   │  ──────────────────  │    │  ────────────────────────────  │ │
+│   │  • Data parsing       │    │  • SEO Pipeline chains/chords  │ │
+│   │  • Weekly digests     │    │  • Google Sheets polling (Beat)│ │
+│   │  • Auto-publish       │    │  • Multi-agent orchestration   │ │
+│   │  • Voice/Video        │    │  • Image generation            │ │
+│   │  • Alerts             │    │  • WordPress publishing        │ │
+│   └───────┬──────────────┘    └──────────┬─────────────────────┘ │
+│           │    Celery Beat (расписание)   │                       │
+│           │    ─────────────────────────  │                       │
+│           │    • poll_google_sheets (5m)  │                       │
+│           │    • retry_stale_workflows    │                       │
+│           │    • existing schedules       │                       │
+│   ┌───────┴──────────────────────────────┴─────────────────────┐ │
+│   │              FastAPI Backend (Unified)                       │ │
+│   │  • Workflow Router (/api/v1/workflows/) + SSE stream        │ │
+│   │  • Blog Router (/api/v1/blog/)                              │ │
+│   │  • Existing routers (auth, billing, content...)             │ │
+│   │  • 12+ AI Agents (BaseAgent + AgentOrchestrator)            │ │
+│   │  • WorkflowEngine (start/status/cancel/retry)               │ │
+│   └───────┬───────────────────────────────┬────────────────────┘ │
+│           │                               │                      │
+│   ┌───────┴──────────┐    ┌──────────────┴─────────────────────┐ │
+│   │ PostgreSQL + Redis│    │ WordPress Headless CMS             │ │
+│   │ Qdrant + MinIO   │    │ (External)                         │ │
+│   │                  │    │                                     │ │
+│   │ WorkflowRun      │    │ REST API + Application Passwords   │ │
+│   │ WorkflowStepLog  │    └─────────────────────────────────────┘ │
+│   │ BlogPost         │                                            │
+│   │ BlogCategory     │                                            │
+│   └──────────────────┘                                            │
+│                                                                   │
+│   ┌─────────────────────────────────────────────────────────────┐ │
+│   │           Next.js 15 Frontend                                │ │
+│   │  • /dashboard/* (существующий, auth-protected)               │ │
+│   │  • /blog/* (NEW: SEO-оптимизированный блог, public)          │ │
+│   │  • Sitemap, robots.txt, Schema.org                           │ │
+│   └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### Почему гибридный подход:
-1. **Celery** остаётся для проверенных задач (парсинг, дайджесты, авто-публикация)
-2. **N8N** добавляется для сложных SEO/GEO конвейеров (визуальный builder, Google Sheets trigger)
-3. **Единый FastAPI** роутит запросы к нужному движку
-4. **Нулевой риск** для существующей функциональности
+### Почему единый Celery-подход (вместо N8N):
+1. **Celery** расширяется для SEO/GEO через chain/chord/group — DAG-подобные пайплайны
+2. **Нет новых внешних зависимостей** — используем существующие Redis, Celery, PostgreSQL
+3. **Google Sheets polling** через Celery Beat (каждые 5 мин) заменяет N8N trigger
+4. **WorkflowEngine + Redis pub/sub + SSE** заменяет N8N UI для real-time трекинга
+5. **Выделенный Celery SEO Worker** (тот же Docker image) изолирует нагрузку от основного worker
+6. **Единый FastAPI** роутит запросы, предоставляет `/api/v1/workflows/` API
+7. **Нулевой риск** для существующей функциональности
 
 ---
 
@@ -91,10 +106,10 @@
 
 | # | Конфликт | Решение |
 |---|----------|---------|
-| 6 | **Нет Google Sheets интеграции** | Новый сервис `google_sheets_sync.py` + N8N нода |
+| 6 | **Нет Google Sheets интеграции** | Новый сервис `google_sheets_sync.py` + Celery Beat polling |
 | 7 | **Нет генерации изображений** | Новый сервис `image_generator.py` + S3 upload (MinIO есть) |
 | 8 | **Perplexity API не интегрирован** | Добавить как tool для Research-агентов (аналог Qdrant RAG) |
-| 9 | **N8N не в docker-compose** | Добавить сервис `n8n` в docker-compose.yml |
+| 9 | **Нет выделенного SEO worker** | Добавить `celery-worker-seo` в docker-compose.yml (тот же image, очереди seo+sheets) |
 | 10 | **WordPress не в инфраструктуре** | Внешний сервис ИЛИ добавить WP + MySQL в compose |
 
 ### Без конфликтов (безопасно добавлять)
@@ -280,53 +295,161 @@ backend/app/services/perplexity_client.py
 
 ---
 
-## 7. N8N Workflow интеграция
+## 7. Celery Workflow Engine (замена N8N)
+
+### Почему Celery вместо N8N
+N8N требует отдельный Docker-контейнер и внешнюю зависимость, которая не может быть развёрнута
+в текущей среде. Celery chain/chord/group предоставляет DAG-подобное выполнение пайплайнов
+с полным контролем из Python, без новых инфраструктурных зависимостей.
 
 ### Docker Compose дополнение
 ```yaml
-n8n:
-  image: n8nio/n8n:latest
-  restart: always
-  ports:
-    - "5678:5678"
-  environment:
-    - N8N_BASIC_AUTH_ACTIVE=true
-    - N8N_BASIC_AUTH_USER=${N8N_USER}
-    - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
-    - WEBHOOK_URL=http://backend:8000/api/v1/n8n/webhooks
-  volumes:
-    - n8n_data:/home/node/.n8n
+celery-worker-seo:
+  build:
+    context: .
+    dockerfile: infra/docker/Dockerfile.backend
+  command: celery -A app.workers.celery_app worker --loglevel=info -Q seo,sheets -c 3
+  restart: unless-stopped
+  env_file: .env
   depends_on:
-    - backend
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  volumes:
+    - ./backend:/app/backend
 ```
 
-### Маппинг 7+1 Workflows → FastAPI endpoints
+### Маппинг 7+1 Workflows → Celery Tasks
 
-| WF # | Название | Триггер | FastAPI endpoint |
-|------|----------|---------|-----------------|
-| 0 | MASTER | Google Sheets New Row | `POST /api/v1/seo/pipeline/start` |
-| 1 | BRAIN | Вызов от Master | `POST /api/v1/seo/brain/execute` |
-| 2 | HOOK | Вызов от Master | `POST /api/v1/seo/hook/execute` |
-| 3 | BODY | Вызов от Master | `POST /api/v1/seo/body/execute` |
-| 4 | ASSEMBLY | Вызов от Master | `POST /api/v1/seo/assembly/execute` |
-| 5 | PUBLISHER | Вызов от Master | `POST /api/v1/seo/publish` |
-| 6 | INDEXER | Фоновый | `POST /api/v1/seo/index` |
-| 7 | IMAGE GEN | Сервисный | `POST /api/v1/seo/image/generate` |
+| WF # | Название | Celery Primitive | Задачи |
+|------|----------|-----------------|--------|
+| 0 | MASTER | Celery Beat poll (5 мин) | `poll_google_sheets` → dispatch chain |
+| 1 | BRAIN | `chain()` | `brain_investigate → brain_architect → brain_validate` |
+| 2 | HOOK | `chord(group(), merge)` | `group(hook_journalist, hook_art_director) → hook_merge` |
+| 3 | BODY | `chord(group(), collect)` | `group(body_write_section * N) → body_collect` |
+| 4 | ASSEMBLY | `chain()` | `assembly_merge` (EditorAgent + SEOSpecAgent) |
+| 5 | PUBLISHER | `chain()` | `publish_to_wordpress` (WP REST API + ISR revalidation) |
+| 6 | INDEXER | `group()` | `group(submit_google_indexnow, submit_yandex_webmaster)` |
+| 7 | IMAGE GEN | `chord(group(), inject)` | `group(generate_single_image * N) → inject_images_into_html` |
 
-### Альтернативный подход (без N8N)
-Можно реализовать все 7+1 workflows как Celery task chains:
+### Полный pipeline (Python DAG)
 ```python
-# Вместо N8N визуального builder — Python DAG
-seo_pipeline = chain(
-    brain_task.s(keyword, settings),
-    group(hook_task.s(), body_task.s()),
-    assembly_task.s(),
-    publisher_task.s(),
-    indexer_task.si()
+from celery import chain, chord, group
+
+seo_article_pipeline = chain(
+    # WF1 BRAIN — sequential
+    brain_investigate.s(wf_run_id, keyword, settings),
+    brain_architect.s(),
+    brain_validate.s(),
+
+    # WF2 HOOK — parallel journalist + art_director, then merge
+    chord(
+        group(hook_journalist.s(), hook_art_director.s()),
+        hook_merge.s()
+    ),
+
+    # WF3 BODY — dynamic fan-out per section (inside body_fan_out)
+    body_fan_out.s(),  # internally creates chord(group(sections), body_collect)
+
+    # WF4 ASSEMBLY — merge all + final edit + SEO meta
+    assembly_merge.s(),
+
+    # WF7 IMAGE GEN — parallel image generation + inject into HTML
+    assembly_with_images.s(),
+
+    # WF5 PUBLISHER — WordPress publish + ISR revalidation
+    publish_to_wordpress.s(),
+
+    # WF6 INDEXER — Google IndexNow + Yandex Webmaster
+    submit_indexing.s(),
 )
-seo_pipeline.delay()
 ```
-**Плюс**: Нет внешних зависимостей. **Минус**: Нет визуального UI для маркетологов.
+
+### Новые модели для трекинга (замена N8N execution history)
+
+```python
+# backend/app/models/workflow_run.py
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
+    id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID, ForeignKey("users.id"), nullable=False)
+    workflow_type = Column(String(50), nullable=False)      # "seo_article", "image_gen"
+    status = Column(String(30), default="pending")           # pending/running/completed/failed/cancelled
+    trigger_source = Column(String(50), nullable=False)     # "google_sheets", "api", "manual"
+    input_data = Column(JSONB, nullable=False)
+    output_data = Column(JSONB)
+    blog_post_id = Column(UUID, ForeignKey("blog_posts.id"), nullable=True)
+    celery_task_id = Column(String(255))
+    error_message = Column(Text)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
+class WorkflowStepLog(Base):
+    __tablename__ = "workflow_step_logs"
+    id = Column(UUID, primary_key=True, default=uuid.uuid4)
+    workflow_run_id = Column(UUID, ForeignKey("workflow_runs.id", ondelete="CASCADE"))
+    step_name = Column(String(100), nullable=False)          # "brain.investigate"
+    step_order = Column(Integer, nullable=False)
+    status = Column(String(30), default="pending")
+    agent_name = Column(String(50))
+    celery_task_id = Column(String(255))
+    input_summary = Column(JSONB)
+    output_summary = Column(JSONB)
+    tokens_used = Column(Integer, default=0)
+    duration_ms = Column(Integer)
+    error_message = Column(Text)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+```
+
+### WorkflowEngine (управление пайплайнами)
+```python
+# backend/app/services/workflow_engine.py
+class WorkflowEngine:
+    """Manages SEO pipeline lifecycle — replaces N8N orchestration."""
+
+    async def start_seo_pipeline(self, user_id, keyword, settings) -> UUID:
+        """Create WorkflowRun, dispatch Celery chain."""
+
+    async def get_status(self, wf_run_id) -> WorkflowStatus:
+        """Query WorkflowRun + steps, compute progress %."""
+
+    async def cancel(self, wf_run_id) -> bool:
+        """Revoke Celery task, mark cancelled."""
+
+    async def retry_failed(self, wf_run_id) -> UUID:
+        """Clone input, re-dispatch from failed step."""
+```
+
+### Real-time статус (замена N8N UI)
+- **Redis pub/sub** канал `workflow:{run_id}:status` — каждый шаг публикует обновления
+- **SSE endpoint** `GET /api/v1/workflows/{id}/stream` — фронтенд подписывается на поток
+- **Workflow API** `GET /api/v1/workflows/{id}/status` — polling fallback
+- **Google Sheets** обновляется автоматически (status → "processing" → "published")
+
+### Workflow API Router
+```
+POST   /api/v1/workflows/start           — запуск pipeline
+GET    /api/v1/workflows/                 — список runs (с фильтрами)
+GET    /api/v1/workflows/{id}/status      — текущий статус + прогресс
+GET    /api/v1/workflows/{id}/stream      — SSE real-time поток
+GET    /api/v1/workflows/{id}/logs        — лог шагов
+POST   /api/v1/workflows/{id}/cancel      — отмена
+POST   /api/v1/workflows/{id}/retry       — повторный запуск
+GET    /api/v1/workflows/stats            — агрегированная статистика
+```
+
+### Google Sheets Polling (замена N8N trigger)
+```python
+# Celery Beat schedule entry
+"poll-google-sheets": {
+    "task": "app.workers.sheets_tasks.poll_google_sheets",
+    "schedule": 300.0,   # каждые 5 минут
+    "options": {"queue": "sheets"},
+}
+
+# Redis distributed lock для дедупликации
+# Lock key: "sheets:poll:lock", TTL: 270s
+```
 
 ---
 
@@ -441,28 +564,33 @@ frontend/src/app/
 └── ReadingProgress bar
 ```
 
-### Phase 13: N8N + Google Sheets (1-2 недели)
+### Phase 13: Google Sheets + Workflow автоматизация (1-2 недели)
 
 ```
-13.1 N8N инфраструктура
-├── Добавить в docker-compose.yml
-├── Nginx reverse proxy конфиг
-├── Webhook endpoints в FastAPI
-└── Authentication для N8N → Backend
+13.1 WorkflowEngine + модели трекинга
+├── WorkflowRun + WorkflowStepLog модели (Alembic миграция)
+├── WorkflowEngine сервис (start/status/cancel/retry)
+├── workflow_callbacks.py (step logging + Redis pub/sub)
+└── Celery task routes (seo + sheets queues)
 
 13.2 Google Sheets интеграция
-├── google_sheets_sync.py
+├── google_sheets_sync.py (gspread + service account)
 ├── CONVEYOR лист (очередь задач)
 ├── PUBLISHED лист (архив)
 ├── SETTINGS лист (настройки)
-└── Trigger: New Row → Pipeline Start
+├── Celery Beat polling (каждые 5 мин)
+└── Redis distributed lock для дедупликации
 
-13.3 N8N Workflows (7+1)
-├── WF0 Master Orchestrator
-├── WF1-4 (Content Pipeline)
-├── WF5 Publisher
-├── WF6 Indexer (Google/Yandex)
-└── WF7 Image Gen (сервисный)
+13.3 Workflow API Router + SSE
+├── /api/v1/workflows/ (start, status, cancel, retry, logs)
+├── SSE endpoint для real-time статуса
+├── Pydantic schemas
+└── Auth + rate limiting
+
+13.4 Celery SEO Worker
+├── Добавить celery-worker-seo в docker-compose.yml
+├── Очереди: seo + sheets (изоляция от default worker)
+└── Concurrency: 3 (ограничение Claude API нагрузки)
 ```
 
 ### Phase 14: Качество и мониторинг (1 неделя)
@@ -494,7 +622,7 @@ Phase 6.2 SalesAgent           (независим)
 Phase 6.3-6.6 Dashboard ──────► Phase 12 Blog использует те же компоненты
 Phase 7.1 Trends ─────────────► Phase 11 может использовать тренды для статей
 Phase 7.2 Sentiment ──────────► Phase 11 Editor может использовать sentiment
-Phase 8.2 Notifications ──────► Phase 13 N8N может отправлять уведомления
+Phase 8.2 Notifications ──────► Phase 13 WorkflowEngine может отправлять уведомления
 Phase 9.1 Teams ──────────────► Blog посты привязаны к user_id (нужен organization_id позже)
 ```
 
@@ -503,7 +631,7 @@ Phase 9.1 Teams ──────────────► Blog посты п
 2. **Phase 10** (фундамент SEO) — модели + агенты + WordPress
 3. **Phase 6.3-6.6** + **Phase 12** (фронтенд) — объединить Dashboard и Blog
 4. **Phase 11** (SEO Pipeline) — конвейер статей
-5. **Phase 13** (N8N) — автоматизация
+5. **Phase 13** (Workflow Engine + Google Sheets) — автоматизация
 6. **Phase 7-9** (расширенная аналитика, teams)
 7. **Phase 14** (качество) — финальная полировка
 
@@ -526,10 +654,10 @@ REPLICATE_API_TOKEN=r8_xxxx
 KIE_AI_API_KEY=xxx
 IMAGE_MODEL=flux-schnell
 
-# N8N
-N8N_USER=admin
-N8N_PASSWORD=secure_password
-N8N_WEBHOOK_URL=http://n8n:5678
+# Workflow Engine
+SEO_PIPELINE_MAX_CONCURRENT=3
+SEO_PIPELINE_SECTION_TIMEOUT=120
+SEO_PIPELINE_TOTAL_TIMEOUT=600
 
 # Google Sheets
 GOOGLE_SHEETS_CREDENTIALS_JSON=path/to/credentials.json
@@ -550,7 +678,7 @@ SITE_DOMAIN=https://example.com
 |------|-------------|---------|-----------|
 | Конфликт с Phase 6 Dashboard | Средняя | Среднее | Разделить: Dashboard = /dashboard, Blog = /blog |
 | WordPress downtime | Низкая | Высокое | Fallback: хранить HTML в PostgreSQL, WP как mirror |
-| N8N workflow нестабильность | Средняя | Среднее | Celery fallback для критичных задач |
+| Celery chain breaks mid-pipeline | Средняя | Среднее | `link_error` на каждой задаче, partial completion для body sections, WorkflowRun статус tracking |
 | Claude API rate limits (12 агентов) | Высокая | Высокое | Batch запросы, Haiku для простых агентов, кэширование |
 | Image generation latency | Высокая | Низкое | Async pipeline, placeholder images, WF7 с retry |
 | Google Sheets API limits | Низкая | Среднее | Кэширование, batch reads, polling не чаще 5 мин |
