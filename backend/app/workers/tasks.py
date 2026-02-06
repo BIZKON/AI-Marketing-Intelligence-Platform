@@ -15,7 +15,7 @@ from app.models.competitor import Competitor
 from app.models.content_plan import ContentPlan, PlanStatus
 from app.models.content_task import ContentTask, TaskStatus
 from app.models.report import Report
-from app.models.subscription import Subscription, SubscriptionStatus
+from app.models.subscription import PlanType, Subscription, SubscriptionStatus
 from app.models.user import User
 from app.services.report_generator import ReportGenerator
 from app.services.vectordb.pipeline import IngestionPipeline
@@ -36,72 +36,82 @@ def _run_async(coro):
 # ── Data Collection ──────────────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60, soft_time_limit=600, time_limit=660)
 def collect_competitor_data(self) -> dict:
-    """Collect data from all active competitors across all platforms.
+    """Fan-out data collection: dispatches one sub-task per competitor.
 
     Runs hourly via Celery Beat.
-    Flow:
-    1. Fetch all active competitors
-    2. For each, run platform parsers
-    3. Deduplicate via SimHash
-    4. Embed new content → Qdrant
-    5. Store in DB
     """
-    logger.info("Starting competitor data collection")
+    logger.info("Starting competitor data collection (fan-out)")
     try:
-        return _run_async(_collect_competitor_data_async())
+        return _run_async(_dispatch_competitor_collection())
     except Exception as exc:
-        logger.exception("Competitor data collection failed, retrying")
+        logger.exception("Competitor data collection dispatch failed, retrying")
         raise self.retry(exc=exc)
 
 
-async def _collect_competitor_data_async() -> dict:
-    results = {"total_competitors": 0, "total_fetched": 0, "total_new": 0, "errors": []}
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30, soft_time_limit=300, time_limit=360)
+def collect_single_competitor(self, competitor_id: str) -> dict:
+    """Collect data for a single competitor. Dispatched by collect_competitor_data."""
+    logger.info("Collecting data for competitor %s", competitor_id)
+    try:
+        return _run_async(_collect_single_competitor_async(competitor_id))
+    except Exception as exc:
+        logger.exception("Collection for competitor %s failed, retrying", competitor_id)
+        raise self.retry(exc=exc)
 
+
+async def _dispatch_competitor_collection() -> dict:
+    """Discover active competitors and dispatch individual tasks."""
     async with async_session_factory() as db:
-        # Get all active competitors
-        stmt = select(Competitor).where(Competitor.is_active.is_(True))
-        competitors = (await db.execute(stmt)).scalars().all()
-        results["total_competitors"] = len(competitors)
+        stmt = (
+            select(Competitor.id)
+            .join(User, Competitor.user_id == User.id)
+            .join(Subscription, Subscription.user_id == User.id)
+            .where(
+                Competitor.is_active.is_(True),
+                User.is_active.is_(True),
+                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+            )
+            .distinct()
+        )
+        competitor_ids = (await db.execute(stmt)).scalars().all()
 
-        if not competitors:
-            logger.info("No active competitors to collect data for")
-            return results
+    dispatched = 0
+    for cid in competitor_ids:
+        collect_single_competitor.delay(str(cid))
+        dispatched += 1
+
+    logger.info("Dispatched %d competitor collection tasks", dispatched)
+    return {"dispatched": dispatched}
+
+
+async def _collect_single_competitor_async(competitor_id: str) -> dict:
+    """Collect data for one competitor."""
+    async with async_session_factory() as db:
+        competitor = await db.get(Competitor, uuid_mod.UUID(competitor_id))
+        if not competitor or not competitor.is_active:
+            return {"status": "skipped", "reason": "inactive or not found"}
 
         pipeline = IngestionPipeline(db)
-
-        # Ensure Qdrant collection exists
         await pipeline.qdrant.ensure_collection()
-
-        # Collect last 24h by default (overlap is handled by deduplication)
         since = datetime.now(timezone.utc) - timedelta(hours=24)
 
-        for competitor in competitors:
-            try:
-                stats = await pipeline.process_competitor(competitor, since=since)
-                results["total_fetched"] += stats["fetched"]
-                results["total_new"] += stats["new"]
-                if stats["errors"]:
-                    results["errors"].extend(stats["errors"])
-            except Exception as e:
-                msg = f"Competitor {competitor.name}: {e}"
-                logger.exception(msg)
-                results["errors"].append(msg)
-
+        stats = await pipeline.process_competitor(competitor, since=since)
         await db.commit()
 
-    logger.info(
-        "Data collection complete: %d competitors, %d fetched, %d new posts",
-        results["total_competitors"], results["total_fetched"], results["total_new"],
-    )
-    return results
+    return {
+        "competitor_id": competitor_id,
+        "fetched": stats["fetched"],
+        "new": stats["new"],
+        "errors": stats.get("errors", []),
+    }
 
 
 # ── Weekly Digests ───────────────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=900, time_limit=960)
 def generate_weekly_digests(self) -> dict:
     """Generate weekly digest reports for all users with active subscriptions.
 
@@ -156,7 +166,7 @@ async def _generate_weekly_digests_async() -> dict:
 # ── Daily Alerts ─────────────────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=600, time_limit=660)
 def check_daily_alerts(self) -> dict:
     """Check for alert-worthy events across all users.
 
@@ -206,10 +216,39 @@ async def _check_daily_alerts_async() -> dict:
     return results
 
 
+# ── Single Draft Generation (#043) ──────────────────────────────────────────
+
+
+@celery_app.task(bind=True, max_retries=2, soft_time_limit=120, time_limit=150)
+def generate_single_draft(self, task_id: str, user_id: str) -> dict:
+    """Generate an AI draft for a single content task. Dispatched from HTTP handler."""
+    logger.info("Generating draft for task %s user %s", task_id, user_id)
+    return _run_async(_generate_single_draft_async(task_id, user_id))
+
+
+async def _generate_single_draft_async(task_id: str, user_id: str) -> dict:
+    async with async_session_factory() as db:
+        task = await db.get(ContentTask, uuid_mod.UUID(task_id))
+        user = await db.get(User, uuid_mod.UUID(user_id))
+        if not task or not user:
+            return {"status": "error", "message": "Task or user not found"}
+
+        from app.services.content_generator import ContentGenerator
+        generator = ContentGenerator(db)
+        updated_task = await generator.generate_draft(task, user)
+        await db.commit()
+
+        return {
+            "status": "ok",
+            "task_id": task_id,
+            "task_status": updated_task.status.value,
+        }
+
+
 # ── Content Plan Generation ──────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=300, time_limit=360)
 def generate_content_plan(self, user_id: str, period: str = "weekly") -> dict:
     """Generate an AI-powered content plan for a user.
 
@@ -224,6 +263,17 @@ async def _generate_content_plan_async(user_id: str, period: str) -> dict:
         user = await db.get(User, uuid_mod.UUID(user_id))
         if not user:
             return {"status": "error", "message": f"User {user_id} not found"}
+
+        # Verify user has an active subscription with Creator+ plan
+        sub_result = await db.execute(
+            select(Subscription).where(
+                Subscription.user_id == user.id,
+                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
+            )
+        )
+        sub = sub_result.scalar_one_or_none()
+        if not sub or sub.plan not in (PlanType.CREATOR, PlanType.AUTOPILOT, PlanType.ENTERPRISE):
+            return {"status": "error", "message": "Active Creator+ subscription required"}
 
         generator = ReportGenerator(db)
         plan_data = await generator.generate_content_plan(user, period=period)
@@ -270,7 +320,7 @@ async def _generate_content_plan_async(user_id: str, period: str) -> dict:
 # ── Auto-Publishing ──────────────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=300, time_limit=360)
 def process_scheduled_publications(self) -> dict:
     """Publish all approved tasks that have passed their scheduled_at time.
 
@@ -336,7 +386,7 @@ async def _process_scheduled_publications_async() -> dict:
 # ── Voice Report ──────────────────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=300, time_limit=360)
 def generate_voice_report(self, voice_report_id: str, source_report_id: str) -> dict:
     """Convert a report to voice using ElevenLabs TTS.
 
@@ -391,7 +441,7 @@ async def _generate_voice_report_async(voice_report_id: str, source_report_id: s
 # ── Video Report ──────────────────────────────────────────────────────────────
 
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=600, time_limit=660)
 def generate_video_report(self, video_report_id: str, source_report_id: str) -> dict:
     """Generate a video report with HeyGen avatar and chart overlays.
 

@@ -4,7 +4,7 @@ import enum
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Enum, ForeignKey, String, Text
+from sqlalchemy import Enum, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,6 +24,10 @@ class ReportType(str, enum.Enum):
 
 class Report(Base):
     __tablename__ = "reports"
+    __table_args__ = (
+        Index("ix_reports_user_type", "user_id", "type"),
+        Index("ix_reports_type", "type"),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

@@ -98,22 +98,27 @@ async def list_users(
     _admin: User = Depends(require_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
-    """List all users with subscription info."""
-    query = select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
+    """List all users with subscription info.
+
+    Uses LEFT JOIN to fetch subscriptions in a single query (#080).
+    """
+    from sqlalchemy.orm import selectinload
+
+    query = select(User).options(
+        selectinload(User.subscriptions)
+    ).order_by(User.created_at.desc()).limit(limit).offset(offset)
+
     if is_active is not None:
         query = query.where(User.is_active == is_active)
     users = (await db.execute(query)).scalars().all()
 
     result = []
     for user in users:
-        # Get active subscription
-        sub = (await db.execute(
-            select(Subscription).where(
-                Subscription.user_id == user.id,
-                Subscription.status == SubscriptionStatus.ACTIVE,
-            )
-        )).scalar_one_or_none()
-
+        # Find active subscription from eagerly loaded collection
+        sub = next(
+            (s for s in user.subscriptions if s.status == SubscriptionStatus.ACTIVE),
+            None,
+        )
         result.append({
             "id": str(user.id),
             "telegram_id": user.telegram_id,

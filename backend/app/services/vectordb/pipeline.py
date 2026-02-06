@@ -103,50 +103,63 @@ class IngestionPipeline:
         competitor: Competitor,
         platform: str,
     ) -> list[CompetitorPost]:
-        """Deduplicate posts and store new ones in the database."""
+        """Deduplicate posts and store new ones in the database.
+
+        Uses batch queries to avoid N+1 (#042):
+        - Batch check all external_ids at once
+        - Fetch recent simhashes once for the competitor
+        """
         new_posts: list[CompetitorPost] = []
+        if not parsed_posts:
+            return new_posts
+
+        # Batch-check existing external_ids to avoid N+1 queries (#042)
+        all_ext_ids = [p.external_id for p in parsed_posts]
+        existing_result = await self.db.execute(
+            select(CompetitorPost.external_id).where(
+                CompetitorPost.external_id.in_(all_ext_ids)
+            )
+        )
+        existing_ext_ids = set(existing_result.scalars().all())
+
+        # Pre-fetch recent simhashes for near-duplicate check (#042)
+        recent_hashes_result = await self.db.execute(
+            select(CompetitorPost.simhash).where(
+                CompetitorPost.competitor_id == competitor.id,
+                CompetitorPost.simhash.isnot(None),
+            ).order_by(CompetitorPost.created_at.desc()).limit(500)
+        )
+        recent_hashes = [h for (h,) in recent_hashes_result if h]
 
         for parsed in parsed_posts:
-            # Check if external_id already exists
-            existing = await self.db.execute(
-                select(CompetitorPost.id).where(
-                    CompetitorPost.external_id == parsed.external_id
-                )
-            )
-            if existing.scalar_one_or_none():
+            # Skip already-existing external_ids
+            if parsed.external_id in existing_ext_ids:
                 continue
 
             # Compute SimHash for content deduplication
             simhash = compute_simhash(parsed.full_text)
 
-            # Check for near-duplicate content in recent posts
+            # Check for near-duplicate content against pre-fetched hashes
             if simhash != "0" * 16:
-                recent_hashes = await self.db.execute(
-                    select(CompetitorPost.simhash).where(
-                        CompetitorPost.competitor_id == competitor.id,
-                        CompetitorPost.simhash.isnot(None),
-                    ).order_by(CompetitorPost.created_at.desc()).limit(500)
+                is_dup = any(
+                    is_near_duplicate(simhash, existing_hash)
+                    for existing_hash in recent_hashes
                 )
-                for (existing_hash,) in recent_hashes:
-                    if existing_hash and is_near_duplicate(simhash, existing_hash):
-                        logger.debug(
-                            "Near-duplicate found for %s (simhash=%s)",
-                            parsed.external_id, simhash,
-                        )
-                        break
-                else:
-                    # No duplicate found — create new post
-                    post = self._make_post(parsed, competitor, platform, simhash)
-                    self.db.add(post)
-                    new_posts.append(post)
+                if is_dup:
+                    logger.debug(
+                        "Near-duplicate found for %s (simhash=%s)",
+                        parsed.external_id, simhash,
+                    )
                     continue
-                # Duplicate was found (break was hit)
-                continue
-            else:
-                # Empty content — still store it (metrics-only post)
-                post = self._make_post(parsed, competitor, platform, simhash)
-                self.db.add(post)
-                new_posts.append(post)
+
+            # Create new post
+            post = self._make_post(parsed, competitor, platform, simhash)
+            self.db.add(post)
+            new_posts.append(post)
+            # Track this external_id and simhash for intra-batch dedup
+            existing_ext_ids.add(parsed.external_id)
+            if simhash != "0" * 16:
+                recent_hashes.append(simhash)
 
         if new_posts:
             await self.db.flush()
@@ -210,11 +223,22 @@ class IngestionPipeline:
 
             point_ids = await self.qdrant.upsert_points(qdrant_points)
 
+            if not point_ids:
+                logger.warning("Qdrant upsert returned no point IDs")
+                return 0
+
             # Update posts with qdrant point IDs
             for (post, _), pid in zip(indexable, point_ids):
                 post.qdrant_point_id = pid
 
-            await self.db.flush()
+            # Flush Postgres; rollback Qdrant on failure (#041)
+            try:
+                await self.db.flush()
+            except Exception:
+                logger.exception("Postgres flush failed after Qdrant upsert, rolling back vectors")
+                await self.qdrant.delete_points(point_ids)
+                raise
+
             logger.info("Embedded and indexed %d posts in Qdrant", len(point_ids))
             return len(point_ids)
 

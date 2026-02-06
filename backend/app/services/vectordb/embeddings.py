@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import struct
 from typing import Sequence
 
 import httpx
 
+from app.core.config import get_settings
+
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY = get_settings().openai_api_key
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIM = 1536
 EMBEDDING_API_URL = "https://api.openai.com/v1/embeddings"

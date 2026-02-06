@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from typing import Any, Sequence
 
 import httpx
 
+from app.core.config import get_settings
+
 logger = logging.getLogger(__name__)
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+_settings = get_settings()
+QDRANT_URL = _settings.qdrant_url
+QDRANT_API_KEY = _settings.qdrant_api_key
 COLLECTION_NAME = "competitor_posts"
 EMBEDDING_DIM = 1536
 

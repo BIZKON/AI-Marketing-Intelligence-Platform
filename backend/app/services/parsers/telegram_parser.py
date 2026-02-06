@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from datetime import datetime, timezone
 
+from app.core.config import get_settings
 from app.services.parsers.base import BaseParser, ParsedPost
 
 logger = logging.getLogger(__name__)
 
-# Telethon API credentials (optional — can also use web scraping fallback)
-TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
-TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
+# Use centralized Settings (#045)
+_settings = get_settings()
+TELEGRAM_API_ID = _settings.telegram_api_id
+TELEGRAM_API_HASH = _settings.telegram_api_hash
 
 
 class TelegramParser(BaseParser):
@@ -52,7 +55,10 @@ class TelegramParser(BaseParser):
             from telethon import TelegramClient
             from telethon.tl.functions.messages import GetHistoryRequest
 
-            client = TelegramClient("parser_session", int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
+            # Use unique session file per process to avoid conflicts (#044)
+            session_dir = tempfile.gettempdir()
+            session_name = os.path.join(session_dir, f"parser_session_{os.getpid()}")
+            client = TelegramClient(session_name, int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
             await client.start()
 
             entity = await client.get_entity(channel)

@@ -30,14 +30,15 @@ class CompetitorPost(Base):
         Index("ix_competitor_posts_competitor_platform", "competitor_id", "platform"),
         Index("ix_competitor_posts_published_at", "published_at"),
         Index("ix_competitor_posts_simhash", "simhash"),
-        UniqueConstraint("external_id", "platform", name="uq_competitor_posts_external_id_platform"),
+        UniqueConstraint("competitor_id", "external_id", "platform", name="uq_competitor_posts_competitor_external_id_platform"),
     )
 
     competitor_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("competitors.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+        # Redundant single-column index removed (#086) — covered by
+        # ix_competitor_posts_competitor_platform composite index
     )
     platform: Mapped[Platform] = mapped_column(
         Enum(Platform, name="platform_type"),

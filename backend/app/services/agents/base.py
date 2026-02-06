@@ -5,21 +5,51 @@ from __future__ import annotations
 import abc
 import json
 import logging
-import os
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
+from app.core.config import get_settings
 from app.services.vectordb.embeddings import EmbeddingService
 from app.services.vectordb.qdrant_client import QdrantService
 
 logger = logging.getLogger(__name__)
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = get_settings().anthropic_api_key
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
 MAX_TOKENS = 4096
+
+# Simple circuit breaker for external APIs (#050)
+_circuit_state: dict[str, dict] = {}
+CIRCUIT_FAILURE_THRESHOLD = 5
+CIRCUIT_RECOVERY_TIMEOUT = 60  # seconds
+
+
+def _check_circuit(service: str) -> bool:
+    """Return True if the circuit is closed (requests allowed)."""
+    state = _circuit_state.get(service)
+    if not state:
+        return True
+    if state["failures"] < CIRCUIT_FAILURE_THRESHOLD:
+        return True
+    # Circuit is open — check if recovery timeout has passed
+    if time.monotonic() - state["last_failure"] > CIRCUIT_RECOVERY_TIMEOUT:
+        state["failures"] = 0  # half-open → allow one request
+        return True
+    return False
+
+
+def _record_failure(service: str) -> None:
+    state = _circuit_state.setdefault(service, {"failures": 0, "last_failure": 0.0})
+    state["failures"] += 1
+    state["last_failure"] = time.monotonic()
+
+
+def _record_success(service: str) -> None:
+    _circuit_state.pop(service, None)
 
 
 @dataclass
@@ -135,11 +165,23 @@ class BaseAgent(abc.ABC):
         )
 
     async def _call_claude(self, user_message: str) -> dict:
-        """Call Claude API with the system prompt and user message."""
+        """Call Claude API with the system prompt and user message.
+
+        Includes circuit breaker to avoid cascading failures (#050).
+        """
         if not self.api_key:
             logger.warning("ANTHROPIC_API_KEY not set, returning placeholder")
             return {
                 "content": "[AI анализ недоступен: API ключ не настроен]",
+                "structured": {},
+                "tokens": 0,
+            }
+
+        # Circuit breaker check (#050)
+        if not _check_circuit("anthropic"):
+            logger.warning("Circuit breaker OPEN for Anthropic API — skipping call")
+            return {
+                "content": "[AI временно недоступен. Сервис восстановится автоматически.]",
                 "structured": {},
                 "tokens": 0,
             }
@@ -165,6 +207,8 @@ class BaseAgent(abc.ABC):
                 resp.raise_for_status()
                 data = resp.json()
 
+            _record_success("anthropic")
+
             content_blocks = data.get("content", [])
             text = "\n".join(
                 block.get("text", "") for block in content_blocks if block.get("type") == "text"
@@ -178,6 +222,7 @@ class BaseAgent(abc.ABC):
             return {"content": text, "structured": structured, "tokens": tokens}
 
         except Exception:
+            _record_failure("anthropic")
             logger.exception("Claude API call failed for agent %s", self.agent_name)
             return {
                 "content": "[Ошибка при вызове AI. Попробуйте позже.]",

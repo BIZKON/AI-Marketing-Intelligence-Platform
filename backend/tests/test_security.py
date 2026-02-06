@@ -60,5 +60,31 @@ def test_password_verify_wrong():
 
 
 def test_access_token_expire_minutes_value():
-    """Expire constant is 24 hours (1440 minutes)."""
-    assert ACCESS_TOKEN_EXPIRE_MINUTES == 1440
+    """Expire constant is 1 hour (60 minutes)."""
+    assert ACCESS_TOKEN_EXPIRE_MINUTES == 60
+
+
+def test_create_refresh_token():
+    """Refresh token contains type=refresh and sub claim."""
+    from app.core.security import create_refresh_token
+    token = create_refresh_token({"sub": "user-456"})
+    payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+    assert payload["sub"] == "user-456"
+    assert payload["type"] == "refresh"
+
+
+def test_decode_refresh_token():
+    """decode_refresh_token validates type=refresh."""
+    from app.core.security import create_refresh_token, decode_refresh_token
+    token = create_refresh_token({"sub": "user-789"})
+    payload = decode_refresh_token(token)
+    assert payload["sub"] == "user-789"
+
+
+def test_decode_refresh_rejects_access_token():
+    """decode_refresh_token rejects access tokens."""
+    from app.core.security import decode_refresh_token
+    import pytest
+    access = create_access_token({"sub": "user-000"})
+    with pytest.raises(ValueError, match="Not a refresh token"):
+        decode_refresh_token(access)

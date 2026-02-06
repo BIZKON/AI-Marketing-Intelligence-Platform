@@ -1,4 +1,4 @@
-"""Token-bucket rate limiting middleware using in-memory storage.
+"""Token-bucket rate limiting middleware using Redis for multi-process support.
 
 Limits API requests per IP. Unauthenticated: 30 req/min, Authenticated: 120 req/min.
 Health check and docs endpoints are exempt.
@@ -6,13 +6,14 @@ Health check and docs endpoints are exempt.
 
 from __future__ import annotations
 
+import logging
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 # Rate limits
 ANON_RATE = 30  # requests per window
@@ -23,23 +24,31 @@ WINDOW_SECONDS = 60
 EXEMPT_PREFIXES = ("/health", "/api/v1/docs", "/api/v1/openapi.json")
 
 
-@dataclass
-class _Bucket:
-    tokens: float
-    last_refill: float = field(default_factory=time.monotonic)
-
-
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory token bucket rate limiter.
+    """Redis-backed sliding window rate limiter.
 
-    In production, replace with Redis-backed implementation for multi-process support.
+    Falls back to pass-through if Redis is unavailable (fail-open).
     """
 
-    def __init__(self, app, **kwargs):
+    def __init__(self, app, redis_url: str | None = None, **kwargs):
         super().__init__(app, **kwargs)
-        self._buckets: dict[str, _Bucket] = defaultdict(
-            lambda: _Bucket(tokens=ANON_RATE)
-        )
+        self._redis = None
+        self._redis_url = redis_url
+
+    async def _get_redis(self):
+        if self._redis is None:
+            try:
+                from app.core.config import get_settings
+                import redis.asyncio as aioredis
+
+                url = self._redis_url or get_settings().redis_url
+                self._redis = aioredis.from_url(url, decode_responses=True)
+                # Test connection
+                await self._redis.ping()
+            except Exception:
+                logger.warning("Redis unavailable for rate limiting, falling back to pass-through")
+                self._redis = None
+        return self._redis
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -54,19 +63,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Get client identifier from actual connection (ignore X-Forwarded-For to prevent spoofing)
         client_ip = request.client.host if request.client else "unknown"
+        key = f"ratelimit:{client_ip}:{'auth' if has_auth else 'anon'}"
 
-        key = f"{client_ip}:{'auth' if has_auth else 'anon'}"
+        r = await self._get_redis()
+        if r is None:
+            # Fail-open: if Redis is down, allow the request
+            return await call_next(request)
 
-        # Token bucket algorithm
-        bucket = self._buckets[key]
-        now = time.monotonic()
-        elapsed = now - bucket.last_refill
+        try:
+            remaining = await self._check_rate_limit(r, key, max_tokens)
+        except Exception:
+            # Fail-open on Redis errors
+            logger.warning("Rate limit check failed, allowing request")
+            return await call_next(request)
 
-        # Refill tokens
-        bucket.tokens = min(max_tokens, bucket.tokens + elapsed * (max_tokens / WINDOW_SECONDS))
-        bucket.last_refill = now
-
-        if bucket.tokens < 1:
+        if remaining < 0:
             retry_after = int(WINDOW_SECONDS / max_tokens)
             return JSONResponse(
                 status_code=429,
@@ -77,22 +88,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={"Retry-After": str(retry_after)},
             )
 
-        bucket.tokens -= 1
-
-        # Cleanup old buckets periodically (every 1000 requests)
-        if len(self._buckets) > 10000:
-            self._cleanup(now)
-
         response = await call_next(request)
 
         # Add rate limit headers
         response.headers["X-RateLimit-Limit"] = str(max_tokens)
-        response.headers["X-RateLimit-Remaining"] = str(int(bucket.tokens))
+        response.headers["X-RateLimit-Remaining"] = str(max(0, remaining))
 
         return response
 
-    def _cleanup(self, now: float) -> None:
-        """Remove stale buckets older than 5 minutes."""
-        stale = [k for k, v in self._buckets.items() if now - v.last_refill > 300]
-        for k in stale:
-            del self._buckets[k]
+    @staticmethod
+    async def _check_rate_limit(r, key: str, max_tokens: int) -> int:
+        """Sliding window counter using Redis sorted sets.
+
+        Returns remaining tokens (negative = over limit).
+        """
+        now = time.time()
+        window_start = now - WINDOW_SECONDS
+
+        pipe = r.pipeline()
+        # Remove old entries outside the window
+        pipe.zremrangebyscore(key, 0, window_start)
+        # Count current requests in window
+        pipe.zcard(key)
+        # Add current request
+        pipe.zadd(key, {f"{now}": now})
+        # Set TTL so keys auto-expire
+        pipe.expire(key, WINDOW_SECONDS + 1)
+        results = await pipe.execute()
+
+        current_count = results[1]  # zcard result
+        remaining = max_tokens - current_count - 1
+        return remaining

@@ -20,7 +20,6 @@ from app.models.report import Report, ReportType
 from app.models.user import User
 from app.services.agents.analyst import AnalystAgent
 from app.services.agents.marketer import MarketerAgent
-from app.services.agents.sales import SalesAgent
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,6 @@ class ReportGenerator:
         self.db = db
         self.analyst = AnalystAgent()
         self.marketer = MarketerAgent()
-        self.sales = SalesAgent()
 
     # ── Weekly Digest ────────────────────────────────────────────────────────
 
@@ -52,11 +50,12 @@ class ReportGenerator:
         """
         since = datetime.now(timezone.utc) - timedelta(days=days)
 
-        # Fetch competitors
+        # Fetch competitors — cast string IDs to UUID (#037)
         if competitor_ids:
+            uuid_ids = [uuid.UUID(cid) if not isinstance(cid, uuid.UUID) else cid for cid in competitor_ids]
             competitors = (await self.db.execute(
                 select(Competitor).where(
-                    Competitor.id.in_(competitor_ids),
+                    Competitor.id.in_(uuid_ids),
                     Competitor.user_id == user.id,
                 )
             )).scalars().all()

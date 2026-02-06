@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.security import create_access_token, create_refresh_token, decode_refresh_token
 from app.schemas.user import UserResponse
 from app.services.user_service import UserService
 
@@ -40,9 +41,19 @@ class TelegramAuthRequest(BaseModel):
 
 class AuthResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     is_new_user: bool = False
     user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -55,8 +66,10 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) ->
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
+    refresh = create_refresh_token({"sub": str(user.id)})
     return {
         "access_token": token,
+        "refresh_token": refresh,
         "token_type": "bearer",
         "is_new_user": True,
         "user": user,
@@ -71,8 +84,10 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
+    refresh = create_refresh_token({"sub": str(user.id)})
     return {
         "access_token": token,
+        "refresh_token": refresh,
         "token_type": "bearer",
         "is_new_user": False,
         "user": user,
@@ -96,9 +111,35 @@ async def telegram_auth(body: TelegramAuthRequest, db: AsyncSession = Depends(ge
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
+    refresh = create_refresh_token({"sub": str(user.id)})
     return {
         "access_token": token,
+        "refresh_token": refresh,
         "token_type": "bearer",
         "is_new_user": is_new,
         "user": user,
     }
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> dict:
+    """Exchange a valid refresh token for a new access token."""
+    try:
+        payload = decode_refresh_token(body.refresh_token)
+        user_id = payload.get("sub")
+        if not user_id:
+            raise ValueError("Missing sub claim")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    import uuid
+    from sqlalchemy import select
+    from app.models.user import User
+
+    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+    new_access = create_access_token({"sub": str(user.id)})
+    return {"access_token": new_access, "token_type": "bearer"}

@@ -50,7 +50,7 @@ class VoiceGenerator:
             {"s3_key": "...", "url": "...", "duration_estimate": "..."}
         """
         # Build speech script
-        script = self._build_speech_script(report_content, report_markdown, title)
+        script = self.build_speech_script(report_content, report_markdown, title)
         logger.info("Speech script: %d chars", len(script))
 
         # Generate audio via ElevenLabs
@@ -103,7 +103,7 @@ class VoiceGenerator:
         logger.info("ElevenLabs TTS: received %d bytes", len(audio_data))
         return audio_data
 
-    def _build_speech_script(
+    def build_speech_script(
         self,
         report_content: dict[str, Any],
         report_markdown: str | None,
