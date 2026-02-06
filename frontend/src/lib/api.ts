@@ -190,6 +190,29 @@ export interface ShopItemResponse {
   type: string;
 }
 
+// Monitoring types
+export interface AtlasCloudServiceStatus {
+  status: "closed" | "open";
+  failures: number;
+  threshold: number;
+  seconds_since_last_failure: number | null;
+}
+
+export interface AtlasCloudStatusResponse {
+  overall: "healthy" | "degraded";
+  services: Record<string, AtlasCloudServiceStatus>;
+}
+
+export interface TrainingPlatformStatsResponse {
+  total_sessions: number;
+  completed_sessions: number;
+  in_progress_sessions: number;
+  completion_rate: number;
+  avg_score: number | null;
+  unique_users: number;
+  total_training_hours: number;
+}
+
 // A/B Test types
 export interface ABTestResponse {
   id: string;
@@ -425,4 +448,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ session_code: sessionCode }),
     }),
+
+  // Monitoring
+  getAtlasCloudStatus: (token: string) =>
+    apiFetch<AtlasCloudStatusResponse>("/monitoring/atlas-cloud/status", { token }),
+
+  getTrainingPlatformStats: (token: string) =>
+    apiFetch<TrainingPlatformStatsResponse>("/monitoring/training/stats", { token }),
 };

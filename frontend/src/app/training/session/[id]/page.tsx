@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, getToken } from "@/lib/api";
@@ -9,6 +9,7 @@ import type {
   TrainingMessageResponse,
   TrainingEvaluationResponse,
 } from "@/lib/api";
+import { useTrainingWebSocket } from "@/hooks/useTrainingWebSocket";
 
 const CRITERIA_LABELS: Record<string, string> = {
   greeting: "Greeting & Rapport",
@@ -24,6 +25,7 @@ export default function TrainingSessionPage() {
   const router = useRouter();
   const params = useParams();
   const sessionId = params.id as string;
+  const token = getToken();
 
   const [session, setSession] = useState<TrainingSessionDetailResponse | null>(null);
   const [messages, setMessages] = useState<TrainingMessageResponse[]>([]);
@@ -35,8 +37,14 @@ export default function TrainingSessionPage() {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const isActive = session?.status === "in_progress";
+
+  // WebSocket connection — only when session is active
+  const ws = useTrainingWebSocket(sessionId, token, isActive === true);
+  const useWS = ws.status === "connected";
+
+  // Load session initially
   useEffect(() => {
-    const token = getToken();
     if (!token) {
       router.replace("/");
       return;
@@ -59,14 +67,41 @@ export default function TrainingSessionPage() {
     }
 
     fetchSession();
-  }, [router, sessionId]);
+  }, [router, sessionId, token]);
 
+  // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function sendMessage() {
-    const token = getToken();
+  // Handle WebSocket responses
+  useEffect(() => {
+    if (ws.lastUserMessage && ws.lastAssistantMessage) {
+      setMessages((prev) => [...prev, ws.lastUserMessage!, ws.lastAssistantMessage!]);
+      setSending(false);
+    }
+  }, [ws.lastUserMessage, ws.lastAssistantMessage]);
+
+  // Handle WebSocket evaluation
+  useEffect(() => {
+    if (ws.evaluation) {
+      setEvaluation(ws.evaluation);
+      setSession((prev) => (prev ? { ...prev, status: "completed" } : prev));
+      setCompleting(false);
+    }
+  }, [ws.evaluation]);
+
+  // Handle WebSocket errors
+  useEffect(() => {
+    if (ws.error) {
+      setError(ws.error);
+      setSending(false);
+      setCompleting(false);
+    }
+  }, [ws.error]);
+
+  // Send message — WebSocket first, fallback to REST
+  const sendMessage = useCallback(async () => {
     if (!token || !inputText.trim() || sending) return;
 
     const text = inputText.trim();
@@ -74,36 +109,48 @@ export default function TrainingSessionPage() {
     setSending(true);
     setError(null);
 
-    try {
-      const result = await api.sendTrainingMessage(token, sessionId, text);
-      setMessages((prev) => [...prev, result.user_message, result.assistant_message]);
-    } catch (err) {
-      const message = err instanceof ApiError ? err.detail : "Failed to send message";
-      setError(message);
-      setInputText(text);
-    } finally {
-      setSending(false);
+    if (useWS) {
+      ws.sendMessage(text);
+      // Response handled by WebSocket effect above
+    } else {
+      // REST fallback
+      try {
+        const result = await api.sendTrainingMessage(token, sessionId, text);
+        setMessages((prev) => [...prev, result.user_message, result.assistant_message]);
+      } catch (err) {
+        const message = err instanceof ApiError ? err.detail : "Failed to send message";
+        setError(message);
+        setInputText(text);
+      } finally {
+        setSending(false);
+      }
     }
-  }
+  }, [token, inputText, sending, useWS, ws, sessionId]);
 
-  async function completeSession() {
-    const token = getToken();
+  // Complete session — WebSocket first, fallback to REST
+  const completeSession = useCallback(async () => {
     if (!token || completing) return;
 
     setCompleting(true);
     setError(null);
 
-    try {
-      const result = await api.completeTrainingSession(token, sessionId);
-      setEvaluation(result);
-      setSession((prev) => prev ? { ...prev, status: "completed" } : prev);
-    } catch (err) {
-      const message = err instanceof ApiError ? err.detail : "Failed to complete session";
-      setError(message);
-    } finally {
-      setCompleting(false);
+    if (useWS) {
+      ws.complete();
+      // Response handled by WebSocket effect above
+    } else {
+      // REST fallback
+      try {
+        const result = await api.completeTrainingSession(token, sessionId);
+        setEvaluation(result);
+        setSession((prev) => (prev ? { ...prev, status: "completed" } : prev));
+      } catch (err) {
+        const message = err instanceof ApiError ? err.detail : "Failed to complete session";
+        setError(message);
+      } finally {
+        setCompleting(false);
+      }
     }
-  }
+  }, [token, completing, useWS, ws, sessionId]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -120,7 +167,6 @@ export default function TrainingSessionPage() {
     );
   }
 
-  const isActive = session?.status === "in_progress";
   const clientName = session?.scenario?.client_persona?.name || "Client";
 
   // Show evaluation view
@@ -263,6 +309,12 @@ export default function TrainingSessionPage() {
               <p className="text-xs text-gray-500">
                 Client: {clientName}
                 {session?.scenario?.client_persona?.mood && ` | Mood: ${session.scenario.client_persona.mood}`}
+                {useWS && (
+                  <span className="ml-2 inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-green-600 dark:text-green-400">live</span>
+                  </span>
+                )}
               </p>
             </div>
             <div className="flex gap-2">
@@ -305,9 +357,9 @@ export default function TrainingSessionPage() {
           )}
 
           <div className="space-y-3">
-            {messages.map((msg) => (
+            {messages.map((msg, idx) => (
               <div
-                key={msg.id}
+                key={msg.id || `msg-${idx}`}
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
@@ -324,7 +376,7 @@ export default function TrainingSessionPage() {
                 </div>
               </div>
             ))}
-            {sending && (
+            {(sending || ws.isWaitingResponse) && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-2 text-sm text-gray-500">
                   {clientName} is typing...
@@ -348,11 +400,11 @@ export default function TrainingSessionPage() {
                 placeholder="Type your message..."
                 rows={1}
                 className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 dark:bg-gray-800 dark:border-gray-600 dark:text-white resize-none"
-                disabled={sending}
+                disabled={sending || ws.isWaitingResponse}
               />
               <button
                 onClick={sendMessage}
-                disabled={sending || !inputText.trim()}
+                disabled={sending || ws.isWaitingResponse || !inputText.trim()}
                 className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Send

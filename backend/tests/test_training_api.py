@@ -85,9 +85,9 @@ async def test_complete_session_requires_auth():
 
 @pytest.mark.asyncio
 async def test_voice_requires_auth():
-    """GET /voice/voices requires authentication."""
+    """GET /voice/config requires authentication."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/api/v1/voice/voices")
+        response = await client.get("/api/v1/voice/config")
     assert response.status_code in (401, 403)
 
 
@@ -101,10 +101,10 @@ async def test_gamification_requires_auth():
 
 @pytest.mark.asyncio
 async def test_multiplayer_requires_auth():
-    """POST /multiplayer/create requires authentication."""
+    """POST /multiplayer/ requires authentication."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
-            "/api/v1/multiplayer/create",
+            "/api/v1/multiplayer/",
             json={"scenario_id": "00000000-0000-0000-0000-000000000000"},
         )
     assert response.status_code in (401, 403)
@@ -120,7 +120,7 @@ async def test_ab_tests_requires_auth():
 
 @pytest.mark.asyncio
 async def test_export_requires_auth():
-    """GET /export/sessions requires authentication."""
+    """GET /export/csv requires authentication."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/api/v1/export/sessions")
+        response = await client.get("/api/v1/export/csv")
     assert response.status_code in (401, 403)
