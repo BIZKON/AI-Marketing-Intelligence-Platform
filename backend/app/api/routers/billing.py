@@ -12,6 +12,7 @@ from app.models.subscription import PlanType
 from app.models.user import User
 from app.schemas.subscription import CheckoutRequest, CheckoutResponse, SubscriptionResponse
 from app.services.billing_service import BillingService
+from app.services.scenario_purchase_service import ScenarioPurchaseService
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -107,7 +108,13 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)) -
     logger.info("Stripe webhook received: %s", event_type)
 
     if event_type == "checkout.session.completed":
-        await svc.handle_checkout_completed(data)
+        # Check if this is a scenario purchase (one-time payment)
+        metadata = data.get("metadata", {})
+        if metadata.get("type") == "scenario_purchase":
+            purchase_svc = ScenarioPurchaseService(db)
+            await purchase_svc.handle_purchase_completed(data)
+        else:
+            await svc.handle_checkout_completed(data)
 
     elif event_type == "invoice.paid":
         await svc.handle_invoice_paid(data)

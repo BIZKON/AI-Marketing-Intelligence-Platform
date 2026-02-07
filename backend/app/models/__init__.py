@@ -20,6 +20,8 @@ from app.models.crm_client import CRMClient
 from app.models.voip_recording import VoIPRecording
 from app.models.daily_challenge import DailyChallenge
 from app.models.user_gamification import UserGamification
+from app.models.push_subscription import PushSubscription
+from app.models.scenario_purchase import ScenarioPurchase
 
 __all__ = [
     "Base",
@@ -44,4 +46,6 @@ __all__ = [
     "VoIPRecording",
     "DailyChallenge",
     "UserGamification",
+    "PushSubscription",
+    "ScenarioPurchase",
 ]

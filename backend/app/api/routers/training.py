@@ -25,6 +25,7 @@ from app.schemas.training import (
     TrainingAnalytics,
     WeeklyStatsResponse,
 )
+from app.services.push_service import PushService
 from app.services.training_service import TrainingService
 
 router = APIRouter()
@@ -206,6 +207,18 @@ async def complete_session(
     # Evaluate the dialog
     evaluation = await svc.evaluate_session(session)
     await db.commit()
+
+    # Send push notification (Web + Telegram) — fire and forget
+    try:
+        push_svc = PushService(db)
+        await push_svc.notify_evaluation_complete(
+            user_id=user.id,
+            telegram_id=user.telegram_id,
+            overall_score=evaluation.overall_score or 0,
+            session_id=session_id,
+        )
+    except Exception:
+        pass  # Push failures should not break the evaluation flow
 
     return EvaluationResponse.model_validate(evaluation)
 
