@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, getToken } from "@/lib/api";
 import type { UserResponse } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [user, setUser] = useState<UserResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,7 +46,7 @@ export default function SettingsPage() {
         setBrandDescription(userData.brand_description || "");
         setToneOfVoice(userData.tone_of_voice || "");
       } catch (err) {
-        const msg = err instanceof ApiError ? err.detail : "Failed to load profile";
+        const msg = err instanceof ApiError ? err.detail : t("settings", "failedToLoad");
         setMessage(msg);
       } finally {
         setLoading(false);
@@ -66,13 +69,13 @@ export default function SettingsPage() {
 
   function resetOnboarding() {
     localStorage.removeItem("training_onboarded");
-    setMessage("Onboarding reset. Visit /training to see it again.");
+    setMessage(t("settings", "onboardingReset"));
   }
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Loading settings...</p>
+        <p className="text-gray-500">{t("settings", "loadingSettings")}</p>
       </div>
     );
   }
@@ -82,10 +85,13 @@ export default function SettingsPage() {
       <header className="border-b border-gray-200 bg-white dark:bg-gray-900 dark:border-gray-800">
         <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Settings</h1>
-            <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">
-              Back to Dashboard
-            </Link>
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">{t("settings", "title")}</h1>
+            <div className="flex items-center gap-3">
+              <LanguageSwitcher />
+              <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">
+                {t("settings", "backToDashboard")}
+              </Link>
+            </div>
           </div>
         </div>
       </header>
@@ -99,10 +105,10 @@ export default function SettingsPage() {
 
         {/* Profile Section */}
         <section className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Profile</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t("settings", "profile")}</h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full Name</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("settings", "fullName")}</label>
               <input
                 type="text"
                 value={fullName}
@@ -111,7 +117,7 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("settings", "email")}</label>
               <input
                 type="email"
                 value={user?.email || ""}
@@ -124,45 +130,45 @@ export default function SettingsPage() {
 
         {/* Brand Section */}
         <section className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Brand Profile</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t("settings", "brandProfile")}</h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Brand Name</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("settings", "brandName")}</label>
               <input
                 type="text"
                 value={brandName}
                 onChange={(e) => setBrandName(e.target.value)}
-                placeholder="Alchemya"
+                placeholder={t("settings", "brandNamePlaceholder")}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Industry</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("settings", "industry")}</label>
               <input
                 type="text"
                 value={brandIndustry}
                 onChange={(e) => setBrandIndustry(e.target.value)}
-                placeholder="Yoga & Wellness Studio"
+                placeholder={t("settings", "industryPlaceholder")}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("settings", "description")}</label>
               <textarea
                 value={brandDescription}
                 onChange={(e) => setBrandDescription(e.target.value)}
                 rows={3}
-                placeholder="Brief description of your brand..."
+                placeholder={t("settings", "descriptionPlaceholder")}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white resize-none"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tone of Voice</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t("settings", "toneOfVoice")}</label>
               <input
                 type="text"
                 value={toneOfVoice}
                 onChange={(e) => setToneOfVoice(e.target.value)}
-                placeholder="Friendly, professional, caring"
+                placeholder={t("settings", "tonePlaceholder")}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-white"
               />
             </div>
@@ -171,11 +177,11 @@ export default function SettingsPage() {
 
         {/* Appearance */}
         <section className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Appearance</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t("settings", "appearance")}</h2>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Dark Mode</p>
-              <p className="text-xs text-gray-500">Switch between light and dark themes</p>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t("settings", "darkMode")}</p>
+              <p className="text-xs text-gray-500">{t("settings", "darkModeDescription")}</p>
             </div>
             <button
               onClick={toggleDarkMode}
@@ -194,17 +200,17 @@ export default function SettingsPage() {
 
         {/* Training Settings */}
         <section className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Training</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t("settings", "trainingSettings")}</h2>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Reset Onboarding</p>
-              <p className="text-xs text-gray-500">Show the onboarding guide again</p>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t("settings", "resetOnboarding")}</p>
+              <p className="text-xs text-gray-500">{t("settings", "resetOnboardingDescription")}</p>
             </div>
             <button
               onClick={resetOnboarding}
               className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
             >
-              Reset
+              {t("common", "reset")}
             </button>
           </div>
         </section>

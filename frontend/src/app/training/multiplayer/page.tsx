@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 interface MultiplayerSession {
   id: string;
@@ -13,6 +15,7 @@ interface MultiplayerSession {
 
 export default function MultiplayerPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [tab, setTab] = useState<"create" | "join">("create");
   const [scenarios, setScenarios] = useState<{ id: string; title: string }[]>([]);
   const [selectedScenario, setSelectedScenario] = useState("");
@@ -64,7 +67,7 @@ export default function MultiplayerPage() {
       if (!res.ok) throw new Error();
       setSession(await res.json());
     } catch {
-      setError("Failed to create session");
+      setError(t("multiplayerPage", "failedToCreate"));
     } finally {
       setLoading(false);
     }
@@ -92,7 +95,7 @@ export default function MultiplayerPage() {
       const data = await res.json();
       setSession({ id: data.session_id, session_code: joinCode, status: "waiting", max_participants: 5 });
     } catch {
-      setError("Failed to join session");
+      setError(t("multiplayerPage", "failedToJoin"));
     } finally {
       setLoading(false);
     }
@@ -101,9 +104,12 @@ export default function MultiplayerPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-          Multiplayer Training
-        </h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            {t("multiplayerPage", "title")}
+          </h1>
+          <LanguageSwitcher />
+        </div>
 
         {error && (
           <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">{error}</div>
@@ -111,19 +117,19 @@ export default function MultiplayerPage() {
 
         {session ? (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 text-center">
-            <h2 className="text-xl font-semibold mb-2 dark:text-white">Session Created</h2>
-            <p className="text-gray-500 dark:text-gray-400 mb-4">Share this code with other players:</p>
+            <h2 className="text-xl font-semibold mb-2 dark:text-white">{t("multiplayerPage", "sessionCreated")}</h2>
+            <p className="text-gray-500 dark:text-gray-400 mb-4">{t("multiplayerPage", "shareCode")}</p>
             <div className="text-4xl font-mono font-bold text-blue-600 tracking-widest mb-4">
               {session.session_code}
             </div>
             <p className="text-sm text-gray-500 mb-6">
-              Status: {session.status} | Max players: {session.max_participants}
+              {t("multiplayerPage", "statusInfo", { status: session.status, count: session.max_participants })}
             </p>
             <button
               onClick={() => setSession(null)}
               className="px-6 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 dark:text-white"
             >
-              Back
+              {t("common", "back")}
             </button>
           </div>
         ) : (
@@ -139,7 +145,7 @@ export default function MultiplayerPage() {
                       : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                   }`}
                 >
-                  Create Session
+                  {t("multiplayerPage", "createSession")}
                 </button>
                 <button
                   onClick={() => setTab("join")}
@@ -149,7 +155,7 @@ export default function MultiplayerPage() {
                       : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                   }`}
                 >
-                  Join Session
+                  {t("multiplayerPage", "joinSession")}
                 </button>
               </div>
 
@@ -157,14 +163,14 @@ export default function MultiplayerPage() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-                      Select Scenario
+                      {t("multiplayerPage", "selectScenario")}
                     </label>
                     <select
                       value={selectedScenario}
                       onChange={(e) => setSelectedScenario(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     >
-                      <option value="">Choose...</option>
+                      <option value="">{t("multiplayerPage", "choose")}</option>
                       {scenarios.map((s) => (
                         <option key={s.id} value={s.id}>{s.title}</option>
                       ))}
@@ -175,14 +181,14 @@ export default function MultiplayerPage() {
                     disabled={loading || !selectedScenario}
                     className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
                   >
-                    {loading ? "Creating..." : "Create Session"}
+                    {loading ? t("multiplayerPage", "creating") : t("multiplayerPage", "createSession")}
                   </button>
                 </div>
               ) : (
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-                      Session Code
+                      {t("multiplayerPage", "sessionCode")}
                     </label>
                     <input
                       type="text"
@@ -198,7 +204,7 @@ export default function MultiplayerPage() {
                     disabled={loading || joinCode.length < 6}
                     className="w-full py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
                   >
-                    {loading ? "Joining..." : "Join Session"}
+                    {loading ? t("multiplayerPage", "joining") : t("multiplayerPage", "joinButton")}
                   </button>
                 </div>
               )}
@@ -206,9 +212,9 @@ export default function MultiplayerPage() {
 
             {/* Leaderboard */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6">
-              <h2 className="text-lg font-semibold mb-4 dark:text-white">Leaderboard</h2>
+              <h2 className="text-lg font-semibold mb-4 dark:text-white">{t("multiplayerPage", "leaderboard")}</h2>
               {leaderboard.length === 0 ? (
-                <p className="text-gray-400 text-center py-8">No data yet</p>
+                <p className="text-gray-400 text-center py-8">{t("common", "noData")}</p>
               ) : (
                 <div className="space-y-2">
                   {leaderboard.map((entry, i) => (

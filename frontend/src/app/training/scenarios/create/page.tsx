@@ -3,23 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getToken } from "@/lib/api";
-
-const SCENARIO_TYPES = [
-  { value: "incoming_call", label: "Incoming Call" },
-  { value: "outbound_call", label: "Outbound Call" },
-  { value: "partner_pitch", label: "Partner Pitch" },
-  { value: "objection_handling", label: "Objection Handling" },
-  { value: "closing", label: "Closing" },
-];
-
-const DIFFICULTIES = [
-  { value: "easy", label: "Easy" },
-  { value: "medium", label: "Medium" },
-  { value: "hard", label: "Hard" },
-];
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export default function CreateScenarioPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +23,20 @@ export default function CreateScenarioPage() {
   const [clientBackground, setClientBackground] = useState("");
   const [objections, setObjections] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+
+  const SCENARIO_TYPES = [
+    { value: "incoming_call", label: t("training", "typeIncomingCall") },
+    { value: "outbound_call", label: t("training", "typeOutboundCall") },
+    { value: "partner_pitch", label: t("training", "typePartnerPitch") },
+    { value: "objection_handling", label: t("training", "typeObjectionHandling") },
+    { value: "closing", label: t("training", "typeClosing") },
+  ];
+
+  const DIFFICULTIES = [
+    { value: "easy", label: t("training", "difficultyEasy") },
+    { value: "medium", label: t("training", "difficultyMedium") },
+    { value: "hard", label: t("training", "difficultyHard") },
+  ];
 
   const generateWithAI = async () => {
     setGenerating(true);
@@ -70,7 +73,7 @@ export default function CreateScenarioPage() {
       const data = await res.json();
       router.push(`/training`);
     } catch {
-      setError("Failed to generate scenario");
+      setError(t("createScenario", "failedToGenerate"));
     } finally {
       setGenerating(false);
     }
@@ -79,7 +82,7 @@ export default function CreateScenarioPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
-      setError("Title is required");
+      setError(t("createScenario", "titleRequired"));
       return;
     }
     setLoading(true);
@@ -117,7 +120,7 @@ export default function CreateScenarioPage() {
       if (!res.ok) throw new Error("Failed to create");
       router.push("/training");
     } catch {
-      setError("Failed to create scenario");
+      setError(t("createScenario", "failedToCreate"));
     } finally {
       setLoading(false);
     }
@@ -128,14 +131,17 @@ export default function CreateScenarioPage() {
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            Create Scenario
+            {t("createScenario", "title")}
           </h1>
-          <button
-            onClick={() => router.back()}
-            className="text-gray-500 hover:text-gray-700"
-          >
-            Cancel
-          </button>
+          <div className="flex items-center gap-3">
+            <LanguageSwitcher />
+            <button
+              onClick={() => router.back()}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              {t("common", "cancel")}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -146,28 +152,28 @@ export default function CreateScenarioPage() {
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Title *
+              {t("createScenario", "titleLabel")}
             </label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-              placeholder="e.g., Cold call to a gym owner"
+              placeholder={t("createScenario", "titlePlaceholder")}
             />
           </div>
 
           {/* Description */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Description
+              {t("createScenario", "descriptionLabel")}
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-              placeholder="Brief scenario description..."
+              placeholder={t("createScenario", "descriptionPlaceholder")}
             />
           </div>
 
@@ -175,21 +181,21 @@ export default function CreateScenarioPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Type
+                {t("createScenario", "typeLabel")}
               </label>
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
               >
-                {SCENARIO_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
+                {SCENARIO_TYPES.map((st) => (
+                  <option key={st.value} value={st.value}>{st.label}</option>
                 ))}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Difficulty
+                {t("createScenario", "difficultyLabel")}
               </label>
               <select
                 value={difficulty}
@@ -206,7 +212,7 @@ export default function CreateScenarioPage() {
           {/* Client Persona */}
           <fieldset className="border rounded-lg p-4 dark:border-gray-700">
             <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 px-2">
-              Client Persona
+              {t("createScenario", "clientPersona")}
             </legend>
             <div className="grid grid-cols-2 gap-4 mt-2">
               <input
@@ -214,14 +220,14 @@ export default function CreateScenarioPage() {
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
                 className="px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                placeholder="Name"
+                placeholder={t("createScenario", "namePlaceholder")}
               />
               <input
                 type="number"
                 value={clientAge}
                 onChange={(e) => setClientAge(e.target.value)}
                 className="px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                placeholder="Age"
+                placeholder={t("createScenario", "agePlaceholder")}
               />
             </div>
             <div className="grid grid-cols-2 gap-4 mt-3">
@@ -230,14 +236,14 @@ export default function CreateScenarioPage() {
                 value={clientMood}
                 onChange={(e) => setClientMood(e.target.value)}
                 className="px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                placeholder="Mood (friendly, skeptical...)"
+                placeholder={t("createScenario", "moodPlaceholder")}
               />
               <input
                 type="text"
                 value={clientBackground}
                 onChange={(e) => setClientBackground(e.target.value)}
                 className="px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                placeholder="Background"
+                placeholder={t("createScenario", "backgroundPlaceholder")}
               />
             </div>
             <textarea
@@ -245,21 +251,21 @@ export default function CreateScenarioPage() {
               onChange={(e) => setObjections(e.target.value)}
               rows={3}
               className="w-full mt-3 px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-              placeholder="Objections (one per line)"
+              placeholder={t("createScenario", "objectionsPlaceholder")}
             />
           </fieldset>
 
           {/* System Prompt */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Custom System Prompt (optional)
+              {t("createScenario", "systemPromptLabel")}
             </label>
             <textarea
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={4}
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white font-mono text-sm"
-              placeholder="Override the AI client behavior..."
+              placeholder={t("createScenario", "systemPromptPlaceholder")}
             />
           </div>
 
@@ -270,7 +276,7 @@ export default function CreateScenarioPage() {
               disabled={loading}
               className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
             >
-              {loading ? "Creating..." : "Create Scenario"}
+              {loading ? t("createScenario", "creating") : t("createScenario", "createButton")}
             </button>
           </div>
         </form>

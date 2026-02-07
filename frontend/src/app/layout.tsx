@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { I18nProvider } from "@/i18n/context";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -23,11 +24,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="ru">
       <body className="min-h-screen bg-gray-50 dark:bg-gray-950">
-        <Suspense fallback={<LoadingFallback />}>
-          {children}
-        </Suspense>
+        <I18nProvider>
+          <Suspense fallback={<LoadingFallback />}>
+            {children}
+          </Suspense>
+        </I18nProvider>
       </body>
     </html>
   );

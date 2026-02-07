@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api, getToken } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export default function VoiceSessionPage() {
   const params = useParams();
   const router = useRouter();
+  const { t } = useI18n();
   const sessionId = params.id as string;
 
   const [status, setStatus] = useState<"idle" | "recording" | "processing" | "done">("idle");
@@ -35,7 +38,7 @@ export default function VoiceSessionPage() {
       mediaRecorder.start();
       setStatus("recording");
     } catch {
-      setError("Microphone access denied");
+      setError(t("voice", "micDenied"));
     }
   };
 
@@ -68,7 +71,6 @@ export default function VoiceSessionPage() {
       if (transcript) {
         setMessages((prev) => [...prev, { role: "user", content: transcript }]);
 
-        // Send as text message to training session
         const result = await api.sendTrainingMessage(token, sessionId, transcript);
         setMessages((prev) => [
           ...prev,
@@ -77,7 +79,7 @@ export default function VoiceSessionPage() {
       }
       setStatus("idle");
     } catch {
-      setError("Failed to process audio");
+      setError(t("voice", "failedToProcess"));
       setStatus("idle");
     }
   };
@@ -90,7 +92,7 @@ export default function VoiceSessionPage() {
       await api.completeTrainingSession(token, sessionId);
       router.push(`/training/session/${sessionId}`);
     } catch {
-      setError("Failed to complete session");
+      setError(t("voice", "failedToComplete"));
     }
   };
 
@@ -99,15 +101,18 @@ export default function VoiceSessionPage() {
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            Voice Training Session
+            {t("voice", "title")}
           </h1>
-          <button
-            onClick={handleComplete}
-            disabled={status === "done" || messages.length === 0}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-          >
-            Complete Session
-          </button>
+          <div className="flex items-center gap-3">
+            <LanguageSwitcher />
+            <button
+              onClick={handleComplete}
+              disabled={status === "done" || messages.length === 0}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              {t("voice", "completeSession")}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -118,7 +123,7 @@ export default function VoiceSessionPage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-4 mb-6 space-y-3 min-h-[300px] max-h-[500px] overflow-y-auto">
           {messages.length === 0 && (
             <p className="text-gray-400 text-center py-10">
-              Press the microphone button to start speaking
+              {t("voice", "micPrompt")}
             </p>
           )}
           {messages.map((msg, i) => (
@@ -173,10 +178,10 @@ export default function VoiceSessionPage() {
         </div>
 
         <p className="text-center text-sm text-gray-500 mt-4">
-          {status === "idle" && "Tap to start recording"}
-          {status === "recording" && "Recording... Tap to stop"}
-          {status === "processing" && "Processing audio..."}
-          {status === "done" && "Session completed"}
+          {status === "idle" && t("voice", "tapToRecord")}
+          {status === "recording" && t("voice", "recording")}
+          {status === "processing" && t("voice", "processing")}
+          {status === "done" && t("voice", "sessionCompleted")}
         </p>
       </div>
     </div>

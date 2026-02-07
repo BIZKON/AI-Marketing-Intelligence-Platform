@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { getToken } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
 
@@ -37,6 +39,7 @@ interface LevelInfo {
 }
 
 export default function GamificationPage() {
+  const { t } = useI18n();
   const [profile, setProfile] = useState<GamificationProfile | null>(null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [shopItems, setShopItems] = useState<ShopItem[]>([]);
@@ -86,13 +89,13 @@ export default function GamificationPage() {
       });
       if (!res.ok) {
         const err = await res.json();
-        setPurchaseMsg(err.detail || "Purchase failed");
+        setPurchaseMsg(err.detail || t("gamification", "purchaseFailed"));
         return;
       }
-      setPurchaseMsg("Purchased!");
+      setPurchaseMsg(t("gamification", "purchased"));
       fetchAll();
     } catch {
-      setPurchaseMsg("Purchase failed");
+      setPurchaseMsg(t("gamification", "purchaseFailed"));
     }
   };
 
@@ -114,16 +117,19 @@ export default function GamificationPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-          Gamification
-        </h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            {t("gamification", "title")}
+          </h1>
+          <LanguageSwitcher />
+        </div>
 
         {/* Profile Card */}
         {profile && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <span className="text-sm text-gray-500 dark:text-gray-400">Level</span>
+                <span className="text-sm text-gray-500 dark:text-gray-400">{t("gamification", "level")}</span>
                 <h2 className="text-2xl font-bold text-blue-600 capitalize">
                   {currentLevel?.label || profile.level}
                 </h2>
@@ -131,15 +137,15 @@ export default function GamificationPage() {
               <div className="flex gap-6 text-center">
                 <div>
                   <div className="text-2xl font-bold text-yellow-500">{profile.coins}</div>
-                  <div className="text-xs text-gray-500">Coins</div>
+                  <div className="text-xs text-gray-500">{t("gamification", "coins")}</div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-orange-500">{profile.current_streak}</div>
-                  <div className="text-xs text-gray-500">Streak</div>
+                  <div className="text-xs text-gray-500">{t("gamification", "streak")}</div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-purple-500">{profile.xp}</div>
-                  <div className="text-xs text-gray-500">XP</div>
+                  <div className="text-xs text-gray-500">{t("gamification", "xp")}</div>
                 </div>
               </div>
             </div>
@@ -151,8 +157,8 @@ export default function GamificationPage() {
               />
             </div>
             <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>{profile.xp} XP</span>
-              <span>{nextLevel ? `${nextLevel.min_xp} XP for ${nextLevel.label}` : "Max level!"}</span>
+              <span>{profile.xp} {t("gamification", "xp")}</span>
+              <span>{nextLevel ? t("gamification", "xpFor", { xp: nextLevel.min_xp, level: nextLevel.label }) : t("gamification", "maxLevel")}</span>
             </div>
           </div>
         )}
@@ -160,9 +166,9 @@ export default function GamificationPage() {
         <div className="grid md:grid-cols-2 gap-6">
           {/* Challenges */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6">
-            <h2 className="text-lg font-semibold mb-4 dark:text-white">Daily Challenges</h2>
+            <h2 className="text-lg font-semibold mb-4 dark:text-white">{t("gamification", "dailyChallenges")}</h2>
             {challenges.length === 0 ? (
-              <p className="text-gray-400 text-center py-4">No challenges today</p>
+              <p className="text-gray-400 text-center py-4">{t("gamification", "noChallenges")}</p>
             ) : (
               <div className="space-y-3">
                 {challenges.map((c) => (
@@ -179,7 +185,7 @@ export default function GamificationPage() {
                         {c.label}
                       </span>
                       <span className="text-xs font-semibold text-yellow-600">
-                        +{c.reward_coins} coins
+                        {t("gamification", "coinsReward", { coins: c.reward_coins })}
                       </span>
                     </div>
                     <div className="mt-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
@@ -196,7 +202,7 @@ export default function GamificationPage() {
 
           {/* Shop */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6">
-            <h2 className="text-lg font-semibold mb-4 dark:text-white">Shop</h2>
+            <h2 className="text-lg font-semibold mb-4 dark:text-white">{t("gamification", "shop")}</h2>
             {purchaseMsg && (
               <div className="mb-3 p-2 text-sm rounded bg-blue-100 text-blue-700">{purchaseMsg}</div>
             )}
@@ -215,7 +221,7 @@ export default function GamificationPage() {
                     disabled={(profile?.coins || 0) < item.price}
                     className="px-3 py-1 text-sm bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50"
                   >
-                    {item.price} coins
+                    {item.price} {t("gamification", "coins").toLowerCase()}
                   </button>
                 </div>
               ))}
@@ -225,9 +231,9 @@ export default function GamificationPage() {
 
         {/* Leaderboard */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow p-6 mt-6">
-          <h2 className="text-lg font-semibold mb-4 dark:text-white">XP Leaderboard</h2>
+          <h2 className="text-lg font-semibold mb-4 dark:text-white">{t("gamification", "xpLeaderboard")}</h2>
           {leaderboard.length === 0 ? (
-            <p className="text-gray-400 text-center py-4">No data yet</p>
+            <p className="text-gray-400 text-center py-4">{t("common", "noData")}</p>
           ) : (
             <div className="space-y-2">
               {leaderboard.map((entry, i) => (
@@ -250,8 +256,8 @@ export default function GamificationPage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-bold text-purple-600">{entry.xp} XP</div>
-                    <div className="text-xs text-orange-500">{entry.current_streak} day streak</div>
+                    <div className="text-sm font-bold text-purple-600">{entry.xp} {t("gamification", "xp")}</div>
+                    <div className="text-xs text-orange-500">{t("gamification", "dayStreak", { days: entry.current_streak })}</div>
                   </div>
                 </div>
               ))}

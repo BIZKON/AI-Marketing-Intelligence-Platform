@@ -5,15 +5,17 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, getToken } from "@/lib/api";
 import type { TrainingAnalyticsResponse } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
-const CRITERIA_LABELS: Record<string, string> = {
-  greeting: "Greeting & Rapport",
-  listening: "Active Listening",
-  objection_handling: "Objection Handling",
-  product_knowledge: "Product Knowledge",
-  closing: "Closing Technique",
-  tone_empathy: "Tone & Empathy",
-  script_adherence: "Script Adherence",
+const CRITERIA_KEY_MAP: Record<string, string> = {
+  greeting: "criteriaGreeting",
+  listening: "criteriaListening",
+  objection_handling: "criteriaObjectionHandling",
+  product_knowledge: "criteriaProductKnowledge",
+  closing: "criteriaClosing",
+  tone_empathy: "criteriaToneEmpathy",
+  script_adherence: "criteriaScriptAdherence",
 };
 
 const ACHIEVEMENT_ICONS: Record<string, string> = {
@@ -28,6 +30,7 @@ const ACHIEVEMENT_ICONS: Record<string, string> = {
 
 export default function TrainingAnalyticsPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [analytics, setAnalytics] = useState<TrainingAnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +47,7 @@ export default function TrainingAnalyticsPage() {
         const data = await api.getTrainingAnalytics(token!);
         setAnalytics(data);
       } catch (err) {
-        const message = err instanceof ApiError ? err.detail : "Failed to load analytics";
+        const message = err instanceof ApiError ? err.detail : t("analyticsPage", "failedToLoad");
         setError(message);
       } finally {
         setLoading(false);
@@ -52,12 +55,12 @@ export default function TrainingAnalyticsPage() {
     }
 
     fetchData();
-  }, [router]);
+  }, [router, t]);
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Loading analytics...</p>
+        <p className="text-gray-500">{t("analyticsPage", "loadingAnalytics")}</p>
       </div>
     );
   }
@@ -65,7 +68,7 @@ export default function TrainingAnalyticsPage() {
   if (error || !analytics) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-red-500">{error || "Failed to load analytics"}</p>
+        <p className="text-red-500">{error || t("analyticsPage", "failedToLoad")}</p>
       </div>
     );
   }
@@ -77,14 +80,17 @@ export default function TrainingAnalyticsPage() {
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-              Training Analytics
+              {t("analyticsPage", "title")}
             </h1>
-            <nav className="flex gap-4">
-              <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">Dashboard</Link>
-              <Link href="/training" className="text-sm font-medium text-gray-500 hover:text-gray-700">Scenarios</Link>
-              <Link href="/training/analytics" className="text-sm font-medium text-brand-600">Analytics</Link>
-              <Link href="/training/history" className="text-sm font-medium text-gray-500 hover:text-gray-700">History</Link>
-            </nav>
+            <div className="flex items-center gap-4">
+              <nav className="flex gap-4">
+                <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "dashboard")}</Link>
+                <Link href="/training" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "scenarios")}</Link>
+                <Link href="/training/analytics" className="text-sm font-medium text-brand-600">{t("common", "analytics")}</Link>
+                <Link href="/training/history" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "history")}</Link>
+              </nav>
+              <LanguageSwitcher />
+            </div>
           </div>
         </div>
       </header>
@@ -92,26 +98,26 @@ export default function TrainingAnalyticsPage() {
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Stats Overview */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
-          <StatCard label="Total Sessions" value={String(analytics.total_sessions)} />
-          <StatCard label="Completed" value={String(analytics.completed_sessions)} />
+          <StatCard label={t("analyticsPage", "totalSessions")} value={String(analytics.total_sessions)} />
+          <StatCard label={t("analyticsPage", "completed")} value={String(analytics.completed_sessions)} />
           <StatCard
-            label="Avg Score"
+            label={t("analyticsPage", "avgScore")}
             value={analytics.avg_score ? String(analytics.avg_score) : "—"}
             highlight={analytics.avg_score !== null && analytics.avg_score >= 70}
           />
           <StatCard
-            label="Best Score"
+            label={t("analyticsPage", "bestScore")}
             value={analytics.best_score ? String(analytics.best_score) : "—"}
             highlight
           />
-          <StatCard label="Total Time" value={`${analytics.total_duration_minutes} min`} />
+          <StatCard label={t("analyticsPage", "totalTime")} value={`${analytics.total_duration_minutes} ${t("common", "min")}`} />
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {/* Criteria Averages */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Criteria Averages
+              {t("analyticsPage", "criteriaAverages")}
             </h2>
             {Object.keys(analytics.criteria_averages).length > 0 ? (
               <div className="space-y-3">
@@ -119,7 +125,7 @@ export default function TrainingAnalyticsPage() {
                   <div key={key}>
                     <div className="flex justify-between text-sm mb-1">
                       <span className="text-gray-700 dark:text-gray-300">
-                        {CRITERIA_LABELS[key] || key}
+                        {CRITERIA_KEY_MAP[key] ? t("session", CRITERIA_KEY_MAP[key]) : key}
                       </span>
                       <span className="font-medium text-gray-900 dark:text-white">{value}</span>
                     </div>
@@ -133,14 +139,14 @@ export default function TrainingAnalyticsPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500">Complete some sessions to see criteria averages.</p>
+              <p className="text-sm text-gray-500">{t("analyticsPage", "noCriteria")}</p>
             )}
           </div>
 
           {/* Weekly Progress */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Weekly Progress
+              {t("analyticsPage", "weeklyProgress")}
             </h2>
             {analytics.weekly_stats.length > 0 ? (
               <div className="space-y-3">
@@ -150,19 +156,19 @@ export default function TrainingAnalyticsPage() {
                     className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 dark:bg-gray-800"
                   >
                     <span className="text-sm text-gray-700 dark:text-gray-300">
-                      Week of {new Date(week.week_start).toLocaleDateString()}
+                      {t("analyticsPage", "weekOf", { date: new Date(week.week_start).toLocaleDateString() })}
                     </span>
                     <div className="flex gap-4 text-sm">
-                      <span className="text-gray-500">{week.sessions_count} sessions</span>
+                      <span className="text-gray-500">{t("analyticsPage", "sessionsCount", { count: week.sessions_count })}</span>
                       <span className="font-medium text-gray-900 dark:text-white">
-                        {week.avg_score ? `Avg: ${week.avg_score}` : "—"}
+                        {week.avg_score ? t("analyticsPage", "avg", { score: week.avg_score }) : "—"}
                       </span>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-500">No weekly data yet. Start training!</p>
+              <p className="text-sm text-gray-500">{t("analyticsPage", "noWeeklyData")}</p>
             )}
           </div>
         </div>
@@ -170,7 +176,7 @@ export default function TrainingAnalyticsPage() {
         {/* Achievements */}
         <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Achievements
+            {t("analyticsPage", "achievements")}
           </h2>
           {analytics.achievements.length > 0 ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
@@ -189,25 +195,25 @@ export default function TrainingAnalyticsPage() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-500">No achievements yet. Complete training sessions to earn badges!</p>
+            <p className="text-sm text-gray-500">{t("analyticsPage", "noAchievements")}</p>
           )}
         </div>
 
         {/* Recent Sessions */}
         <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Recent Sessions
+            {t("analyticsPage", "recentSessions")}
           </h2>
           {analytics.recent_sessions.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-2 text-gray-500 font-medium">Date</th>
-                    <th className="text-left py-2 text-gray-500 font-medium">Mode</th>
-                    <th className="text-left py-2 text-gray-500 font-medium">Status</th>
-                    <th className="text-left py-2 text-gray-500 font-medium">Duration</th>
-                    <th className="text-right py-2 text-gray-500 font-medium">Action</th>
+                    <th className="text-left py-2 text-gray-500 font-medium">{t("analyticsPage", "date")}</th>
+                    <th className="text-left py-2 text-gray-500 font-medium">{t("analyticsPage", "mode")}</th>
+                    <th className="text-left py-2 text-gray-500 font-medium">{t("analyticsPage", "status")}</th>
+                    <th className="text-left py-2 text-gray-500 font-medium">{t("analyticsPage", "duration")}</th>
+                    <th className="text-right py-2 text-gray-500 font-medium">{t("analyticsPage", "action")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -232,7 +238,7 @@ export default function TrainingAnalyticsPage() {
                       </td>
                       <td className="py-2 text-gray-600 dark:text-gray-400">
                         {session.duration_seconds
-                          ? `${Math.floor(session.duration_seconds / 60)} min`
+                          ? `${Math.floor(session.duration_seconds / 60)} ${t("common", "min")}`
                           : "—"}
                       </td>
                       <td className="py-2 text-right">
@@ -240,7 +246,7 @@ export default function TrainingAnalyticsPage() {
                           href={`/training/session/${session.id}`}
                           className="text-brand-600 hover:text-brand-500 font-medium"
                         >
-                          View
+                          {t("common", "view")}
                         </Link>
                       </td>
                     </tr>
@@ -249,7 +255,7 @@ export default function TrainingAnalyticsPage() {
               </table>
             </div>
           ) : (
-            <p className="text-sm text-gray-500">No sessions yet. Start your first training!</p>
+            <p className="text-sm text-gray-500">{t("analyticsPage", "noSessions")}</p>
           )}
         </div>
       </main>

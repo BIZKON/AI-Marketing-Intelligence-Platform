@@ -10,22 +10,24 @@ import type {
   TrainingEvaluationResponse,
 } from "@/lib/api";
 import { useTrainingWebSocket } from "@/hooks/useTrainingWebSocket";
-
-const CRITERIA_LABELS: Record<string, string> = {
-  greeting: "Greeting & Rapport",
-  listening: "Active Listening",
-  objection_handling: "Objection Handling",
-  product_knowledge: "Product Knowledge",
-  closing: "Closing Technique",
-  tone_empathy: "Tone & Empathy",
-  script_adherence: "Script Adherence",
-};
+import { useI18n } from "@/i18n/context";
 
 export default function TrainingSessionPage() {
   const router = useRouter();
   const params = useParams();
   const sessionId = params.id as string;
   const token = getToken();
+  const { t } = useI18n();
+
+  const CRITERIA_LABELS: Record<string, string> = {
+    greeting: t("session", "criteriaGreeting"),
+    listening: t("session", "criteriaListening"),
+    objection_handling: t("session", "criteriaObjectionHandling"),
+    product_knowledge: t("session", "criteriaProductKnowledge"),
+    closing: t("session", "criteriaClosing"),
+    tone_empathy: t("session", "criteriaToneEmpathy"),
+    script_adherence: t("session", "criteriaScriptAdherence"),
+  };
 
   const [session, setSession] = useState<TrainingSessionDetailResponse | null>(null);
   const [messages, setMessages] = useState<TrainingMessageResponse[]>([]);
@@ -59,7 +61,7 @@ export default function TrainingSessionPage() {
           setEvaluation(data.evaluation);
         }
       } catch (err) {
-        const message = err instanceof ApiError ? err.detail : "Failed to load session";
+        const message = err instanceof ApiError ? err.detail : t("session", "failedToLoad");
         setError(message);
       } finally {
         setLoading(false);
@@ -118,7 +120,7 @@ export default function TrainingSessionPage() {
         const result = await api.sendTrainingMessage(token, sessionId, text);
         setMessages((prev) => [...prev, result.user_message, result.assistant_message]);
       } catch (err) {
-        const message = err instanceof ApiError ? err.detail : "Failed to send message";
+        const message = err instanceof ApiError ? err.detail : t("session", "failedToSend");
         setError(message);
         setInputText(text);
       } finally {
@@ -144,7 +146,7 @@ export default function TrainingSessionPage() {
         setEvaluation(result);
         setSession((prev) => (prev ? { ...prev, status: "completed" } : prev));
       } catch (err) {
-        const message = err instanceof ApiError ? err.detail : "Failed to complete session";
+        const message = err instanceof ApiError ? err.detail : t("session", "failedToComplete");
         setError(message);
       } finally {
         setCompleting(false);
@@ -162,7 +164,7 @@ export default function TrainingSessionPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Loading session...</p>
+        <p className="text-gray-500">{t("session", "loadingSession")}</p>
       </div>
     );
   }
@@ -177,20 +179,20 @@ export default function TrainingSessionPage() {
           <div className="mx-auto max-w-4xl px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between">
               <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-                Session Results
+                {t("session", "sessionResults")}
               </h1>
               <div className="flex gap-3">
                 <Link
                   href="/training"
                   className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 transition-colors"
                 >
-                  New Training
+                  {t("session", "newTraining")}
                 </Link>
                 <Link
                   href="/training/analytics"
                   className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-300"
                 >
-                  Analytics
+                  {t("common", "analytics")}
                 </Link>
               </div>
             </div>
@@ -205,17 +207,17 @@ export default function TrainingSessionPage() {
                 {evaluation.overall_score ?? 0}
               </span>
             </div>
-            <p className="text-lg text-gray-600 dark:text-gray-400">Overall Score</p>
+            <p className="text-lg text-gray-600 dark:text-gray-400">{t("session", "overallScore")}</p>
             {evaluation.mood_analysis && (
               <p className="text-sm text-gray-500 mt-1">
-                Client mood: <span className="font-medium">{evaluation.mood_analysis}</span>
+                {t("session", "clientMood")} <span className="font-medium">{evaluation.mood_analysis}</span>
               </p>
             )}
           </div>
 
           {/* Criteria Breakdown */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800 mb-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Criteria Breakdown</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{t("session", "criteriaBreakdown")}</h2>
             <div className="space-y-3">
               {Object.entries(evaluation.criteria_scores).map(([key, score]) => (
                 <div key={key}>
@@ -238,7 +240,7 @@ export default function TrainingSessionPage() {
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 mb-6">
             {evaluation.strengths && evaluation.strengths.length > 0 && (
               <div className="rounded-lg border border-green-200 bg-green-50 p-4 dark:bg-green-950 dark:border-green-800">
-                <h3 className="font-semibold text-green-800 dark:text-green-300 mb-2">Strengths</h3>
+                <h3 className="font-semibold text-green-800 dark:text-green-300 mb-2">{t("session", "strengths")}</h3>
                 <ul className="space-y-1">
                   {evaluation.strengths.map((s, i) => (
                     <li key={i} className="text-sm text-green-700 dark:text-green-400">+ {s}</li>
@@ -248,7 +250,7 @@ export default function TrainingSessionPage() {
             )}
             {evaluation.improvements && evaluation.improvements.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:bg-amber-950 dark:border-amber-800">
-                <h3 className="font-semibold text-amber-800 dark:text-amber-300 mb-2">Areas to Improve</h3>
+                <h3 className="font-semibold text-amber-800 dark:text-amber-300 mb-2">{t("session", "areasToImprove")}</h3>
                 <ul className="space-y-1">
                   {evaluation.improvements.map((s, i) => (
                     <li key={i} className="text-sm text-amber-700 dark:text-amber-400">- {s}</li>
@@ -261,7 +263,7 @@ export default function TrainingSessionPage() {
           {/* Detailed Feedback */}
           {evaluation.detailed_feedback && (
             <div className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800 mb-6">
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Detailed Feedback</h3>
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{t("session", "detailedFeedback")}</h3>
               <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                 {evaluation.detailed_feedback}
               </p>
@@ -270,7 +272,7 @@ export default function TrainingSessionPage() {
 
           {/* Transcript */}
           <div className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Dialog Transcript</h3>
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">{t("session", "dialogTranscript")}</h3>
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {messages.map((msg) => (
                 <div
@@ -304,15 +306,15 @@ export default function TrainingSessionPage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-base font-semibold text-gray-900 dark:text-white">
-                {session?.scenario?.title || "Training Session"}
+                {session?.scenario?.title || t("session", "title")}
               </h1>
               <p className="text-xs text-gray-500">
-                Client: {clientName}
-                {session?.scenario?.client_persona?.mood && ` | Mood: ${session.scenario.client_persona.mood}`}
+                {t("training", "client")} {clientName}
+                {session?.scenario?.client_persona?.mood && ` | ${t("session", "mood")} ${session.scenario.client_persona.mood}`}
                 {useWS && (
                   <span className="ml-2 inline-flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    <span className="text-green-600 dark:text-green-400">live</span>
+                    <span className="text-green-600 dark:text-green-400">{t("session", "live")}</span>
                   </span>
                 )}
               </p>
@@ -324,14 +326,14 @@ export default function TrainingSessionPage() {
                   disabled={completing}
                   className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-green-500 transition-colors disabled:opacity-50"
                 >
-                  {completing ? "Evaluating..." : "Complete & Evaluate"}
+                  {completing ? t("session", "evaluating") : t("session", "completeEvaluate")}
                 </button>
               )}
               <Link
                 href="/training"
                 className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300"
               >
-                Back
+                {t("common", "back")}
               </Link>
             </div>
           </div>
@@ -349,9 +351,9 @@ export default function TrainingSessionPage() {
 
           {messages.length === 0 && isActive && (
             <div className="text-center py-12">
-              <p className="text-gray-500 mb-2">Start the conversation with {clientName}!</p>
+              <p className="text-gray-500 mb-2">{t("session", "startConversation", { name: clientName })}</p>
               <p className="text-sm text-gray-400">
-                {session?.scenario?.description || "Type your first message below."}
+                {session?.scenario?.description || t("session", "typeFirstMessage")}
               </p>
             </div>
           )}
@@ -379,7 +381,7 @@ export default function TrainingSessionPage() {
             {(sending || ws.isWaitingResponse) && (
               <div className="flex justify-start">
                 <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-2 text-sm text-gray-500">
-                  {clientName} is typing...
+                  {t("session", "isTyping", { name: clientName })}
                 </div>
               </div>
             )}
@@ -397,7 +399,7 @@ export default function TrainingSessionPage() {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Type your message..."
+                placeholder={t("session", "placeholder")}
                 rows={1}
                 className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 dark:bg-gray-800 dark:border-gray-600 dark:text-white resize-none"
                 disabled={sending || ws.isWaitingResponse}
@@ -407,7 +409,7 @@ export default function TrainingSessionPage() {
                 disabled={sending || ws.isWaitingResponse || !inputText.trim()}
                 className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Send
+                {t("common", "send")}
               </button>
             </div>
           </div>

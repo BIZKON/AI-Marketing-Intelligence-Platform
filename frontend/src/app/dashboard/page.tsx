@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, getToken } from "@/lib/api";
 import type { CompetitorResponse, SubscriptionResponse, ContentTaskResponse } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 interface DashboardData {
   competitors: CompetitorResponse[];
@@ -14,6 +16,7 @@ interface DashboardData {
 
 export default function Dashboard() {
   const router = useRouter();
+  const { t } = useI18n();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +38,7 @@ export default function Dashboard() {
         ]);
         setData({ competitors, tasks, subscription });
       } catch (err) {
-        const message = err instanceof ApiError ? err.detail : "Failed to load dashboard";
+        const message = err instanceof ApiError ? err.detail : t("dashboard", "failedToLoad");
         setError(message);
       } finally {
         setLoading(false);
@@ -48,7 +51,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-gray-500">{t("common", "loading")}</p>
       </div>
     );
   }
@@ -71,15 +74,18 @@ export default function Dashboard() {
       <header className="border-b border-gray-200 bg-white dark:bg-gray-900 dark:border-gray-800">
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-              Dashboard
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+                {t("dashboard", "title")}
+              </h1>
+              <LanguageSwitcher />
+            </div>
             <nav className="flex gap-4">
-              <Link href="/dashboard" className="text-sm font-medium text-brand-600">Overview</Link>
-              <Link href="/dashboard/competitors" className="text-sm font-medium text-gray-500 hover:text-gray-700">Competitors</Link>
-              <Link href="/dashboard/content" className="text-sm font-medium text-gray-500 hover:text-gray-700">Content</Link>
-              <Link href="/dashboard/reports" className="text-sm font-medium text-gray-500 hover:text-gray-700">Reports</Link>
-              <Link href="/training" className="text-sm font-medium text-gray-500 hover:text-gray-700">Training</Link>
+              <Link href="/dashboard" className="text-sm font-medium text-brand-600">{t("dashboard", "overview")}</Link>
+              <Link href="/dashboard/competitors" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("dashboard", "competitors")}</Link>
+              <Link href="/dashboard/content" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("dashboard", "content")}</Link>
+              <Link href="/dashboard/reports" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("dashboard", "reports")}</Link>
+              <Link href="/training" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "training")}</Link>
             </nav>
           </div>
         </div>
@@ -89,21 +95,21 @@ export default function Dashboard() {
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Stats cards */}
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <StatsCard title="Competitors" value={String(competitorCount)} description="Being tracked" />
-          <StatsCard title="Reports" value="-" description="This month" />
-          <StatsCard title="Content Tasks" value={String(taskCount)} description="In pipeline" />
-          <StatsCard title="Plan" value={plan.charAt(0).toUpperCase() + plan.slice(1)} description="Current subscription" />
+          <StatsCard title={t("dashboard", "competitors")} value={String(competitorCount)} description={t("dashboard", "beingTracked")} />
+          <StatsCard title={t("dashboard", "reports")} value="-" description={t("dashboard", "thisMonth")} />
+          <StatsCard title={t("dashboard", "contentTasks")} value={String(taskCount)} description={t("dashboard", "inPipeline")} />
+          <StatsCard title={t("dashboard", "plan")} value={plan.charAt(0).toUpperCase() + plan.slice(1)} description={t("dashboard", "currentSubscription")} />
         </div>
 
         {/* Placeholder sections */}
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Competitor Activity</h2>
-            <p className="mt-2 text-sm text-gray-500">Activity charts will be displayed here.</p>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("dashboard", "competitorActivity")}</h2>
+            <p className="mt-2 text-sm text-gray-500">{t("dashboard", "activityCharts")}</p>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-6 dark:bg-gray-900 dark:border-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Reports</h2>
-            <p className="mt-2 text-sm text-gray-500">Latest digests and alerts will appear here.</p>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("dashboard", "recentReports")}</h2>
+            <p className="mt-2 text-sm text-gray-500">{t("dashboard", "recentReportsPlaceholder")}</p>
           </div>
         </div>
       </main>

@@ -5,12 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, getToken } from "@/lib/api";
 import type { TrainingScenarioResponse, TrainingAnalyticsResponse } from "@/lib/api";
-
-const DIFFICULTY_LABELS: Record<string, string> = {
-  easy: "Easy",
-  medium: "Medium",
-  hard: "Hard",
-};
+import { useI18n } from "@/i18n/context";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 const DIFFICULTY_COLORS: Record<string, string> = {
   easy: "bg-green-100 text-green-800",
@@ -18,21 +14,28 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   hard: "bg-red-100 text-red-800",
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  incoming_call: "Incoming Call",
-  outbound_call: "Outbound Call",
-  partner_pitch: "Partner Pitch",
-  objection_handling: "Objection Handling",
-  closing: "Closing",
-};
-
 export default function TrainingPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [scenarios, setScenarios] = useState<TrainingScenarioResponse[]>([]);
   const [analytics, setAnalytics] = useState<TrainingAnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const DIFFICULTY_LABELS: Record<string, string> = {
+    easy: t("training", "difficultyEasy"),
+    medium: t("training", "difficultyMedium"),
+    hard: t("training", "difficultyHard"),
+  };
+
+  const TYPE_LABELS: Record<string, string> = {
+    incoming_call: t("training", "typeIncomingCall"),
+    outbound_call: t("training", "typeOutboundCall"),
+    partner_pitch: t("training", "typePartnerPitch"),
+    objection_handling: t("training", "typeObjectionHandling"),
+    closing: t("training", "typeClosing"),
+  };
 
   useEffect(() => {
     const token = getToken();
@@ -50,7 +53,7 @@ export default function TrainingPage() {
         setScenarios(scenarioList);
         setAnalytics(analyticsData);
       } catch (err) {
-        const message = err instanceof ApiError ? err.detail : "Failed to load training data";
+        const message = err instanceof ApiError ? err.detail : t("training", "failedToLoad");
         setError(message);
       } finally {
         setLoading(false);
@@ -68,7 +71,7 @@ export default function TrainingPage() {
       const session = await api.createTrainingSession(token, scenarioId);
       router.push(`/training/session/${session.id}`);
     } catch (err) {
-      const message = err instanceof ApiError ? err.detail : "Failed to start session";
+      const message = err instanceof ApiError ? err.detail : t("training", "failedToStart");
       setError(message);
       setStarting(null);
     }
@@ -77,7 +80,7 @@ export default function TrainingPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500">Loading training scenarios...</p>
+        <p className="text-gray-500">{t("training", "loadingScenarios")}</p>
       </div>
     );
   }
@@ -89,18 +92,21 @@ export default function TrainingPage() {
         <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-              Sales Training
+              {t("training", "title")}
             </h1>
-            <nav className="flex gap-4 flex-wrap">
-              <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">Dashboard</Link>
-              <Link href="/training" className="text-sm font-medium text-brand-600">Scenarios</Link>
-              <Link href="/training/analytics" className="text-sm font-medium text-gray-500 hover:text-gray-700">Analytics</Link>
-              <Link href="/training/history" className="text-sm font-medium text-gray-500 hover:text-gray-700">History</Link>
-              <Link href="/training/multiplayer" className="text-sm font-medium text-gray-500 hover:text-gray-700">Multiplayer</Link>
-              <Link href="/training/gamification" className="text-sm font-medium text-gray-500 hover:text-gray-700">Gamification</Link>
-              <Link href="/training/ab-tests" className="text-sm font-medium text-gray-500 hover:text-gray-700">A/B Tests</Link>
-              <Link href="/training/export" className="text-sm font-medium text-gray-500 hover:text-gray-700">Export</Link>
-            </nav>
+            <div className="flex items-center gap-4">
+              <nav className="flex gap-4 flex-wrap">
+                <Link href="/dashboard" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "dashboard")}</Link>
+                <Link href="/training" className="text-sm font-medium text-brand-600">{t("common", "scenarios")}</Link>
+                <Link href="/training/analytics" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "analytics")}</Link>
+                <Link href="/training/history" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "history")}</Link>
+                <Link href="/training/multiplayer" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "multiplayer")}</Link>
+                <Link href="/training/gamification" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "gamification")}</Link>
+                <Link href="/training/ab-tests" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "abTests")}</Link>
+                <Link href="/training/export" className="text-sm font-medium text-gray-500 hover:text-gray-700">{t("common", "export")}</Link>
+              </nav>
+              <LanguageSwitcher />
+            </div>
           </div>
         </div>
       </header>
@@ -116,23 +122,23 @@ export default function TrainingPage() {
         {analytics && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-4 mb-8">
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:bg-gray-900 dark:border-gray-800">
-              <p className="text-sm text-gray-500">Total Sessions</p>
+              <p className="text-sm text-gray-500">{t("training", "totalSessions")}</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">{analytics.total_sessions}</p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:bg-gray-900 dark:border-gray-800">
-              <p className="text-sm text-gray-500">Avg Score</p>
+              <p className="text-sm text-gray-500">{t("training", "avgScore")}</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                {analytics.avg_score ? `${analytics.avg_score}` : "—"}
+                {analytics.avg_score ? `${analytics.avg_score}` : "\u2014"}
               </p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:bg-gray-900 dark:border-gray-800">
-              <p className="text-sm text-gray-500">Best Score</p>
+              <p className="text-sm text-gray-500">{t("training", "bestScore")}</p>
               <p className="text-2xl font-bold text-green-600">
-                {analytics.best_score ?? "—"}
+                {analytics.best_score ?? "\u2014"}
               </p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white p-4 dark:bg-gray-900 dark:border-gray-800">
-              <p className="text-sm text-gray-500">Achievements</p>
+              <p className="text-sm text-gray-500">{t("training", "achievements")}</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">{analytics.achievements.length}</p>
             </div>
           </div>
@@ -140,12 +146,12 @@ export default function TrainingPage() {
 
         {/* Scenarios Grid */}
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Training Scenarios</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("training", "trainingScenarios")}</h2>
           <Link
             href="/training/scenarios/create"
             className="rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-500"
           >
-            Create Scenario
+            {t("training", "createScenario")}
           </Link>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -169,7 +175,7 @@ export default function TrainingPage() {
                 {scenario.description}
               </p>
               <div className="flex items-center gap-2 mb-4">
-                <span className="text-xs text-gray-400">Client:</span>
+                <span className="text-xs text-gray-400">{t("training", "client")}</span>
                 <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
                   {scenario.client_persona.name}
                   {scenario.client_persona.age ? `, ${scenario.client_persona.age}` : ""}
@@ -189,7 +195,7 @@ export default function TrainingPage() {
                 disabled={starting === scenario.id}
                 className="w-full rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {starting === scenario.id ? "Starting..." : "Start Training"}
+                {starting === scenario.id ? t("training", "starting") : t("training", "startTraining")}
               </button>
             </div>
           ))}
@@ -197,7 +203,7 @@ export default function TrainingPage() {
 
         {scenarios.length === 0 && !error && (
           <div className="text-center py-12">
-            <p className="text-gray-500">No training scenarios available.</p>
+            <p className="text-gray-500">{t("training", "noScenarios")}</p>
           </div>
         )}
       </main>
