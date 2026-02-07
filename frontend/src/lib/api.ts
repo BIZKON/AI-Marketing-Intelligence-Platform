@@ -213,6 +213,56 @@ export interface TrainingPlatformStatsResponse {
   total_training_hours: number;
 }
 
+// Cohort Analytics types
+export interface CohortEntry {
+  cohort_label: string;
+  user_count: number;
+  total_sessions: number;
+  completed_sessions: number;
+  avg_score: number | null;
+  avg_sessions_per_user: number;
+  completion_rate: number;
+}
+
+export interface LeaderboardEntry {
+  user_id: string;
+  display_name: string;
+  sessions: number;
+  avg_score: number | null;
+  best_score: number | null;
+  level: string;
+  xp: number;
+}
+
+export interface UserRankResponse {
+  rank: number;
+  total_users: number;
+  percentile: number;
+  total_sessions: number;
+  completed_sessions: number;
+  avg_score: number | null;
+  avg_sessions_per_user: number;
+  completion_rate: number;
+}
+
+// Scenario Purchase types
+export interface PremiumScenarioResponse {
+  id: string;
+  title: string;
+  description: string | null;
+  difficulty: string;
+  price_cents: number;
+  tags: string[] | null;
+}
+
+export interface ScenarioPurchaseResponse {
+  id: string;
+  scenario_id: string;
+  amount_cents: number;
+  currency: string;
+  created_at: string | null;
+}
+
 // A/B Test types
 export interface ABTestResponse {
   id: string;
@@ -455,4 +505,34 @@ export const api = {
 
   getTrainingPlatformStats: (token: string) =>
     apiFetch<TrainingPlatformStatsResponse>("/monitoring/training/stats", { token }),
+
+  // Cohort Analytics
+  getCohortsByRegistration: (token: string, periodDays: number = 30) =>
+    apiFetch<CohortEntry[]>(`/cohorts/by-registration?period_days=${periodDays}`, { token }),
+
+  getCohortsByPlan: (token: string) =>
+    apiFetch<CohortEntry[]>("/cohorts/by-plan", { token }),
+
+  getLeaderboard: (token: string, limit: number = 20) =>
+    apiFetch<LeaderboardEntry[]>(`/cohorts/leaderboard?limit=${limit}`, { token }),
+
+  getMyRank: (token: string) =>
+    apiFetch<UserRankResponse>("/cohorts/my-rank", { token }),
+
+  // Scenario Purchases
+  getPremiumScenarios: (token: string) =>
+    apiFetch<PremiumScenarioResponse[]>("/purchases/premium-scenarios", { token }),
+
+  createScenarioPurchaseCheckout: (token: string, scenarioId: string) =>
+    apiFetch<{ checkout_url: string }>("/purchases/checkout", {
+      token,
+      method: "POST",
+      body: JSON.stringify({ scenario_id: scenarioId }),
+    }),
+
+  checkScenarioPurchase: (token: string, scenarioId: string) =>
+    apiFetch<{ purchased: boolean }>(`/purchases/check/${scenarioId}`, { token }),
+
+  getMyPurchases: (token: string) =>
+    apiFetch<ScenarioPurchaseResponse[]>("/purchases/my-purchases", { token }),
 };

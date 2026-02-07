@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     stripe_price_autopilot: str = ""
     stripe_price_enterprise: str = ""
 
+    # Web Push (VAPID)
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+
     # YouTube
     youtube_api_key: str = ""
 

@@ -5,8 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routers import (
-    ab_tests, admin, auth, billing, calls, competitors, content, crm,
-    export, gamification, monitoring, multiplayer, reports, training,
+    ab_tests, admin, auth, billing, calls, cohort_analytics, competitors,
+    content, crm, export, gamification, monitoring, multiplayer,
+    notifications, reports, scenario_purchases, training,
     users, voice, voip, ws_training,
 )
 from app.core.config import get_settings
@@ -65,6 +66,9 @@ app.include_router(voip.router, prefix=f"{settings.api_prefix}/voip", tags=["voi
 app.include_router(gamification.router, prefix=f"{settings.api_prefix}/gamification", tags=["gamification"])
 app.include_router(export.router, prefix=f"{settings.api_prefix}/export", tags=["export"])
 app.include_router(monitoring.router, prefix=f"{settings.api_prefix}/monitoring", tags=["monitoring"])
+app.include_router(notifications.router, prefix=f"{settings.api_prefix}/notifications", tags=["notifications"])
+app.include_router(cohort_analytics.router, prefix=f"{settings.api_prefix}/cohorts", tags=["cohorts"])
+app.include_router(scenario_purchases.router, prefix=f"{settings.api_prefix}/purchases", tags=["purchases"])
 app.include_router(ws_training.router, tags=["websocket"])
 
 
