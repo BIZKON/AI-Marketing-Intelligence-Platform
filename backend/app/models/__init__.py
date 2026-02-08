@@ -22,6 +22,7 @@ from app.models.daily_challenge import DailyChallenge
 from app.models.user_gamification import UserGamification
 from app.models.push_subscription import PushSubscription
 from app.models.scenario_purchase import ScenarioPurchase
+from app.models.export import TelegramSession, ExportSource, ExportJob, MessageMeta
 
 __all__ = [
     "Base",
@@ -48,4 +49,8 @@ __all__ = [
     "UserGamification",
     "PushSubscription",
     "ScenarioPurchase",
+    "TelegramSession",
+    "ExportSource",
+    "ExportJob",
+    "MessageMeta",
 ]

@@ -52,6 +52,13 @@ dependencies = [
     # S3
     "boto3>=1.35.0",
 
+    # Telegram Export + RAG Pipeline
+    "telethon>=1.36.0",
+    "cryptography>=42.0.0",
+    "tiktoken>=0.7.0",
+    "aiofiles>=24.0.0",
+    "pydub>=0.25.1",
+
     # Utilities
     "python-multipart>=0.0.17",
     "python-jose[cryptography]>=3.3.0",

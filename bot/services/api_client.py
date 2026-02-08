@@ -308,3 +308,77 @@ class APIClient:
         resp = await client.get(str(base).rsplit("/api/v1", 1)[0] + "/health/detailed", headers=self._headers)
         resp.raise_for_status()
         return resp.json()
+
+    # ── Telegram Export + RAG ────────────────────────────────────────────
+
+    async def export_connect(self, api_id: int, api_hash: str, phone: str) -> dict:
+        return await self._request("POST", "/tg-export/connect", json={
+            "api_id": api_id, "api_hash": api_hash, "phone": phone,
+        })
+
+    async def export_verify(
+        self, session_id: str, code: str, password_2fa: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {"session_id": session_id, "code": code}
+        if password_2fa:
+            body["password_2fa"] = password_2fa
+        return await self._request("POST", "/tg-export/verify", json=body)
+
+    async def export_list_sources(self) -> list[dict]:
+        return await self._request("GET", "/tg-export/sources")
+
+    async def export_add_source(
+        self, username: str, source_type: str = "channel", title: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {
+            "telegram_id_or_username": username,
+            "source_type": source_type,
+        }
+        if title:
+            body["title"] = title
+        return await self._request("POST", "/tg-export/sources", json=body)
+
+    async def export_delete_source(self, source_id: str) -> None:
+        await self._request("DELETE", f"/tg-export/sources/{source_id}")
+
+    async def export_start(self, source_id: str, **config: Any) -> dict:
+        body: dict[str, Any] = {"source_id": source_id, **config}
+        return await self._request("POST", "/tg-export/jobs", json=body)
+
+    async def export_list_jobs(self, limit: int = 20) -> list[dict]:
+        return await self._request("GET", "/tg-export/jobs", params={"limit": limit})
+
+    async def export_get_job(self, job_id: str) -> dict:
+        return await self._request("GET", f"/tg-export/jobs/{job_id}")
+
+    async def export_cancel_job(self, job_id: str) -> dict:
+        return await self._request("POST", f"/tg-export/jobs/{job_id}/cancel")
+
+    async def export_search(
+        self, query: str, source_ids: list[str] | None = None,
+        date_from: str | None = None, date_to: str | None = None,
+        min_reactions: int = 0, limit: int = 10,
+    ) -> dict:
+        body: dict[str, Any] = {"query": query, "limit": limit, "min_reactions": min_reactions}
+        if source_ids:
+            body["source_ids"] = source_ids
+        if date_from:
+            body["date_from"] = date_from
+        if date_to:
+            body["date_to"] = date_to
+        return await self._request("POST", "/tg-export/search", json=body)
+
+    async def export_popular(self, source_id: str, min_reactions: int = 5, limit: int = 50) -> list[dict]:
+        return await self._request("GET", "/tg-export/analytics/popular", params={
+            "source_id": source_id, "min_reactions": min_reactions, "limit": limit,
+        })
+
+    async def export_authors(self, source_id: str, limit: int = 20) -> list[dict]:
+        return await self._request("GET", "/tg-export/analytics/authors", params={
+            "source_id": source_id, "limit": limit,
+        })
+
+    async def export_activity(self, source_id: str) -> dict:
+        return await self._request("GET", "/tg-export/analytics/activity", params={
+            "source_id": source_id,
+        })
