@@ -14,6 +14,7 @@ from app.core.database import async_session_factory
 from app.models.competitor import Competitor
 from app.models.content_plan import ContentPlan, PlanStatus
 from app.models.content_task import ContentTask, TaskStatus
+from app.models.export import ExportJob, ExportJobStatus, TelegramSession
 from app.models.export import ExportJob, ExportJobStatus, ExportSource, TelegramSession
 from app.models.report import Report
 from app.models.subscription import PlanType, Subscription, SubscriptionStatus
@@ -497,6 +498,16 @@ async def _generate_video_report_async(video_report_id: str, source_report_id: s
 # ── Telegram Export ──────────────────────────────────────────────────────────
 
 
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=120, soft_time_limit=1800, time_limit=1860)
+def run_export(self, job_id: str) -> dict:
+    """Execute a Telegram data export job.
+
+    Fetches messages via Telethon, processes media, transcribes audio,
+    persists metadata, and ingests content into the RAG pipeline.
+
+    Dispatched from the POST /tg-export/jobs endpoint.
+    """
+    logger.info("Starting Telegram export job %s", job_id)
 @celery_app.task(bind=True, max_retries=2, soft_time_limit=1800, time_limit=1860)
 def run_export(self, job_id: str) -> dict:
     """Execute a Telegram export job.
@@ -509,6 +520,13 @@ def run_export(self, job_id: str) -> dict:
         return _run_async(_run_export_async(job_id))
     except Exception as exc:
         logger.exception("Export job %s failed, retrying", job_id)
+        # Mark job as failed before retrying
+        _run_async(_mark_export_failed(job_id, str(exc)))
+        raise self.retry(exc=exc)
+
+
+async def _run_export_async(job_id: str) -> dict:
+    """Async implementation of the export task."""
         raise self.retry(exc=exc, countdown=60)
 
 
@@ -524,6 +542,26 @@ async def _run_export_async(job_id: str) -> dict:
         if not job:
             return {"status": "error", "message": f"Export job {job_id} not found"}
 
+        if job.status == ExportJobStatus.CANCELLED:
+            return {"status": "cancelled", "job_id": job_id}
+
+        # Get the Telegram session
+        tg_session = await db.get(TelegramSession, job.session_id)
+        if not tg_session or not tg_session.is_active:
+            job.status = ExportJobStatus.FAILED
+            job.error_message = "Telegram session not found or inactive"
+            await db.commit()
+            return {"status": "error", "message": "Session not available"}
+
+        # Initialize service dependencies
+        from app.services.export.analytics import ExportAnalytics
+        from app.services.export.media import MediaProcessor
+        from app.services.export.telegram_export import TelegramExportService
+        from app.services.export.transcriber import WhisperTranscriber
+        from app.services.rag.ingestion import RAGIngestionPipeline
+
+        rag_pipeline = RAGIngestionPipeline(db)
+        await rag_pipeline.ensure_collection()
         if job.status not in (ExportJobStatus.PENDING, ExportJobStatus.PROCESSING):
             return {"status": "skipped", "message": f"Job {job_id} has status {job.status.value}"}
 
@@ -547,6 +585,7 @@ async def _run_export_async(job_id: str) -> dict:
         transcriber = WhisperTranscriber()
         analytics = ExportAnalytics(db)
 
+        export_service = TelegramExportService(
         service = TelegramExportService(
             db=db,
             rag_pipeline=rag_pipeline,
@@ -555,6 +594,13 @@ async def _run_export_async(job_id: str) -> dict:
             analytics=analytics,
         )
 
+        # Determine entity to export
+        entity_id: int | str = job.source_tg_id
+        if entity_id.lstrip("-").isdigit():
+            entity_id = int(entity_id)
+
+        # Run the export
+        completed_job = await export_service.export_entity(
         # Determine entity_id from source or job
         entity_id: int | str = job.source_tg_id
         if source and source.username:
@@ -572,6 +618,36 @@ async def _run_export_async(job_id: str) -> dict:
 
         await db.commit()
 
+        logger.info(
+            "Export job %s finished with status %s: %d messages",
+            job_id,
+            completed_job.status.value,
+            completed_job.processed_messages or 0,
+        )
+
+        return {
+            "status": completed_job.status.value,
+            "job_id": job_id,
+            "processed_messages": completed_job.processed_messages or 0,
+            "total_chunks": completed_job.total_chunks or 0,
+        }
+
+
+async def _mark_export_failed(job_id: str, error: str) -> None:
+    """Mark an export job as failed in the database."""
+    try:
+        async with async_session_factory() as db:
+            job = await db.get(ExportJob, uuid_mod.UUID(job_id))
+            if job and job.status not in (
+                ExportJobStatus.COMPLETED,
+                ExportJobStatus.CANCELLED,
+            ):
+                job.status = ExportJobStatus.FAILED
+                job.error_message = error[:2000]
+                job.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+    except Exception:
+        logger.exception("Failed to mark export job %s as failed", job_id)
         return {
             "status": completed_job.status.value,
             "job_id": str(completed_job.id),
