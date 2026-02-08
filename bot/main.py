@@ -9,7 +9,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.handlers import (
-    admin, common, competitors, content, gamification,
+    admin, common, competitors, content, export, gamification,
     multiplayer_handler, onboarding, reports, training,
 )
 from bot.middlewares.auth import AuthMiddleware
@@ -70,6 +70,7 @@ async def main() -> None:
     dp.include_router(training.router)
     dp.include_router(gamification.router)
     dp.include_router(multiplayer_handler.router)
+    dp.include_router(export.router)
     dp.include_router(admin.router)
 
     logger.info("Starting bot...")

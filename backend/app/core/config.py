@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     telegram_webhook_url: str = ""
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
+    telegram_encryption_key: str = ""  # Fernet key for encrypting Telethon sessions & api_hash
 
     # VK
     vk_access_token: str = ""

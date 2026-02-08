@@ -146,6 +146,24 @@ services:
       - ./bot:/app/bot
       - ./backend:/app/backend
 
+  # ── Export Worker (Celery queue for TG export tasks) ───
+  export-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.backend
+    command: celery -A app.workers.celery_app worker -Q export --loglevel=info -c 2
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+
   # ── Frontend (Next.js) ─────────────────────────────────
   frontend:
     build:
