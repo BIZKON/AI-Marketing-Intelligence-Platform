@@ -98,6 +98,21 @@ services:
       redis:
         condition: service_healthy
 
+  export-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.backend
+    command: celery -A app.workers.celery_app worker -Q export --loglevel=info -c 2
+    restart: always
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
   bot:
     build:
       context: .
