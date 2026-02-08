@@ -1,5 +1,6 @@
 from celery import Celery
 from celery.schedules import crontab
+from kombu import Queue
 
 from app.core.config import get_settings
 
@@ -27,11 +28,20 @@ celery_app.conf.update(
     # Queue routing
     task_routes={
         "app.workers.tasks.collect_competitor_data": {"queue": "collection"},
+        "app.workers.tasks.collect_single_competitor": {"queue": "collection"},
         "app.workers.tasks.generate_voice_report": {"queue": "media"},
         "app.workers.tasks.generate_video_report": {"queue": "media"},
+        "app.workers.tasks.run_export": {"queue": "export"},
+        "app.workers.tasks.auto_export_sources": {"queue": "export"},
         "app.workers.tasks.*": {"queue": "default"},
     },
     task_default_queue="default",
+    task_queues=[
+        Queue("default"),
+        Queue("collection"),
+        Queue("media"),
+        Queue("export"),
+    ],
 )
 
 celery_app.conf.beat_schedule = {
@@ -50,6 +60,10 @@ celery_app.conf.beat_schedule = {
     "process-scheduled-publications": {
         "task": "app.workers.tasks.process_scheduled_publications",
         "schedule": 300.0,  # Every 5 minutes
+    },
+    "auto-export-sources": {
+        "task": "app.workers.tasks.auto_export_sources",
+        "schedule": crontab(hour="*/6", minute=15),  # Every 6 hours at :15
     },
 }
 

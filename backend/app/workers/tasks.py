@@ -14,6 +14,7 @@ from app.core.database import async_session_factory
 from app.models.competitor import Competitor
 from app.models.content_plan import ContentPlan, PlanStatus
 from app.models.content_task import ContentTask, TaskStatus
+from app.models.export import ExportJob, ExportJobStatus, ExportSource, TelegramSession
 from app.models.report import Report
 from app.models.subscription import PlanType, Subscription, SubscriptionStatus
 from app.models.user import User
@@ -491,3 +492,183 @@ async def _generate_video_report_async(video_report_id: str, source_report_id: s
             await db.commit()
             logger.exception("Video report %s failed", video_report_id)
             return {"status": "error", "report_id": video_report_id, "message": str(e)}
+
+
+# ── Telegram Export ──────────────────────────────────────────────────────────
+
+
+@celery_app.task(bind=True, max_retries=2, soft_time_limit=1800, time_limit=1860)
+def run_export(self, job_id: str) -> dict:
+    """Execute a Telegram export job.
+
+    Dispatched from the /telegram-export/jobs endpoint.
+    Runs on the 'export' queue with extended time limits for large channels.
+    """
+    logger.info("Starting export job %s", job_id)
+    try:
+        return _run_async(_run_export_async(job_id))
+    except Exception as exc:
+        logger.exception("Export job %s failed, retrying", job_id)
+        raise self.retry(exc=exc, countdown=60)
+
+
+async def _run_export_async(job_id: str) -> dict:
+    from app.services.export.analytics import ExportAnalytics
+    from app.services.export.media import MediaProcessor
+    from app.services.export.telegram_export import TelegramExportService
+    from app.services.export.transcriber import WhisperTranscriber
+    from app.services.vectordb.pipeline import IngestionPipeline
+
+    async with async_session_factory() as db:
+        job = await db.get(ExportJob, uuid_mod.UUID(job_id))
+        if not job:
+            return {"status": "error", "message": f"Export job {job_id} not found"}
+
+        if job.status not in (ExportJobStatus.PENDING, ExportJobStatus.PROCESSING):
+            return {"status": "skipped", "message": f"Job {job_id} has status {job.status.value}"}
+
+        # Load the Telegram session
+        tg_session = await db.get(TelegramSession, job.session_id)
+        if not tg_session or not tg_session.is_active:
+            job.status = ExportJobStatus.FAILED
+            job.error_message = "Telegram session is inactive or not found"
+            job.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            return {"status": "error", "message": "No active Telegram session"}
+
+        # Load source
+        source = await db.get(ExportSource, job.source_id) if job.source_id else None
+
+        # Initialize service dependencies
+        rag_pipeline = IngestionPipeline(db)
+        await rag_pipeline.qdrant.ensure_collection()
+
+        media_processor = MediaProcessor()
+        transcriber = WhisperTranscriber()
+        analytics = ExportAnalytics(db)
+
+        service = TelegramExportService(
+            db=db,
+            rag_pipeline=rag_pipeline,
+            media_processor=media_processor,
+            transcriber=transcriber,
+            analytics=analytics,
+        )
+
+        # Determine entity_id from source or job
+        entity_id: int | str = job.source_tg_id
+        if source and source.username:
+            entity_id = source.username
+        elif source:
+            entity_id = source.telegram_id
+
+        # Run the export
+        completed_job = await service.export_entity(
+            user_id=job.user_id,
+            session=tg_session,
+            entity_id=entity_id,
+            config=job.config or {},
+        )
+
+        await db.commit()
+
+        return {
+            "status": completed_job.status.value,
+            "job_id": str(completed_job.id),
+            "processed_messages": completed_job.processed_messages,
+        }
+
+
+@celery_app.task(bind=True, max_retries=3, soft_time_limit=300, time_limit=360)
+def auto_export_sources(self) -> dict:
+    """Re-export all sources with auto_export=True.
+
+    Runs on a schedule via Celery Beat. For each source with auto_export enabled,
+    dispatches a separate run_export task to the export queue.
+    """
+    logger.info("Starting auto-export check for sources with auto_export=True")
+    try:
+        return _run_async(_auto_export_sources_async())
+    except Exception as exc:
+        logger.exception("Auto-export sources check failed, retrying")
+        raise self.retry(exc=exc)
+
+
+async def _auto_export_sources_async() -> dict:
+    results = {"dispatched": 0, "skipped": 0, "errors": []}
+
+    async with async_session_factory() as db:
+        # Find sources with auto_export enabled that have an active session
+        stmt = (
+            select(ExportSource)
+            .where(ExportSource.auto_export.is_(True))
+        )
+        sources = (await db.execute(stmt)).scalars().all()
+
+        for source in sources:
+            try:
+                # Check for active session
+                session_stmt = select(TelegramSession).where(
+                    TelegramSession.user_id == source.user_id,
+                    TelegramSession.is_active.is_(True),
+                ).order_by(TelegramSession.created_at.desc()).limit(1)
+                session_result = await db.execute(session_stmt)
+                tg_session = session_result.scalar_one_or_none()
+
+                if not tg_session:
+                    results["skipped"] += 1
+                    continue
+
+                # Check there's no running export for this source
+                running_stmt = select(ExportJob).where(
+                    ExportJob.source_id == source.id,
+                    ExportJob.status.in_([
+                        ExportJobStatus.PENDING,
+                        ExportJobStatus.PROCESSING,
+                        ExportJobStatus.CHUNKING,
+                        ExportJobStatus.EMBEDDING,
+                    ]),
+                )
+                running_result = await db.execute(running_stmt)
+                if running_result.scalar_one_or_none():
+                    results["skipped"] += 1
+                    continue
+
+                # Create a new export job
+                job = ExportJob(
+                    user_id=source.user_id,
+                    session_id=tg_session.id,
+                    source_id=source.id,
+                    source_type=source.telegram_type,
+                    source_tg_id=source.username or str(source.telegram_id),
+                    source_name=source.title,
+                    config={"auto": True},
+                    status=ExportJobStatus.PENDING,
+                )
+                db.add(job)
+                await db.flush()
+
+                # Dispatch to export queue
+                run_export.delay(str(job.id))
+                results["dispatched"] += 1
+
+                logger.info(
+                    "Auto-export dispatched for source %s (%s)",
+                    source.id,
+                    source.title,
+                )
+
+            except Exception as e:
+                msg = f"Source {source.id}: {e}"
+                logger.exception(msg)
+                results["errors"].append(msg)
+
+        await db.commit()
+
+    logger.info(
+        "Auto-export: %d dispatched, %d skipped, %d errors",
+        results["dispatched"],
+        results["skipped"],
+        len(results["errors"]),
+    )
+    return results
