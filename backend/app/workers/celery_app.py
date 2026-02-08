@@ -29,6 +29,7 @@ celery_app.conf.update(
         "app.workers.tasks.collect_competitor_data": {"queue": "collection"},
         "app.workers.tasks.generate_voice_report": {"queue": "media"},
         "app.workers.tasks.generate_video_report": {"queue": "media"},
+        "app.workers.tasks.run_export": {"queue": "export"},
         "app.workers.tasks.*": {"queue": "default"},
     },
     task_default_queue="default",
