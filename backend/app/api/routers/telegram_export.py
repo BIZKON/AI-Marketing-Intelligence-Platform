@@ -1,21 +1,34 @@
-"""Telegram Export API — endpoints for the TG Data Export + RAG Pipeline module.
+"""Telegram Data Export router — connect accounts, manage sources, export, search, analytics.
 
-Provides REST API for:
-- Connecting user's Telegram account (Telethon session)
-- Managing export sources (channels, groups, chats)
-- Running and tracking export jobs
-- Semantic search over exported data
-- Analytics: popular posts, top authors, activity
+Part of the Telegram Data Export + RAG Pipeline module (L1 Data Collection).
+
+Endpoints:
+  POST /connect           — Init Telethon session, send verification code
+  POST /verify            — Verify code / 2FA, save encrypted StringSession
+  GET  /sources           — List user's export sources
+  POST /sources           — Add source (channel / group / chat / folder)
+  DELETE /sources/{id}    — Delete source + Qdrant data
+  POST /jobs              — Start export job
+  GET  /jobs              — List export jobs (history + active)
+  GET  /jobs/{id}         — Get job details + progress
+  POST /jobs/{id}/cancel  — Cancel running export
+  POST /search            — Semantic search across exported messages
+  GET  /analytics/popular — Popular posts by reactions
+  GET  /analytics/authors — Top authors by activity
+  GET  /analytics/activity— Activity distribution (hour, weekday, daily)
+  GET  /folders           — List Telegram folders for connected account
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -32,15 +45,24 @@ from app.models.export import (
 from app.models.subscription import PlanType, Subscription
 from app.models.user import User
 
-router = APIRouter()
+logger = logging.getLogger(__name__)
 settings = get_settings()
+router = APIRouter()
 
-# ── Plan limits ──────────────────────────────────────────────────────────────
+
+# ── Plan limits ───────────────────────────────────────────────────────────────
 
 SOURCE_LIMITS = {
     PlanType.MONITOR: 3,
     PlanType.CREATOR: 7,
     PlanType.AUTOPILOT: 15,
+    PlanType.ENTERPRISE: 999,
+}
+
+EXPORT_WEEKLY_LIMITS = {
+    PlanType.MONITOR: 1,
+    PlanType.CREATOR: 7,
+    PlanType.AUTOPILOT: 999,
     PlanType.ENTERPRISE: 999,
 }
 
@@ -68,18 +90,19 @@ class ConnectResponse(BaseModel):
 
 class VerifyRequest(BaseModel):
     session_id: str
-    code: str
+    code: str = ""
     password_2fa: str | None = None
 
 
 class VerifyResponse(BaseModel):
     status: str
-    message: str
+    requires_2fa: bool = False
+    message: str = ""
 
 
 class SourceCreateRequest(BaseModel):
     telegram_id_or_username: str
-    source_type: ExportSourceType = ExportSourceType.CHANNEL
+    type: ExportSourceType = ExportSourceType.CHANNEL
     title: str | None = None
 
 
@@ -87,12 +110,14 @@ class SourceResponse(BaseModel):
     id: str
     telegram_id: int
     telegram_type: str
-    username: str | None
+    username: str | None = None
     title: str
-    auto_export: bool
-    total_messages: int
-    total_chunks: int
-    last_export_at: str | None
+    auto_export: bool = False
+    total_messages: int = 0
+    total_chunks: int = 0
+    total_authors: int = 0
+    last_export_at: str | None = None
+    created_at: str | None = None
 
     class Config:
         from_attributes = True
@@ -100,27 +125,23 @@ class SourceResponse(BaseModel):
 
 class JobCreateRequest(BaseModel):
     source_id: str
-    date_from: str | None = None  # ISO format
-    date_to: str | None = None
-    min_reactions: int = 0
-    include_media: bool = True
-    transcribe_voice: bool = True
-    chunk_size: int = 500
-    chunk_overlap: int = 50
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class JobResponse(BaseModel):
     id: str
+    source_id: str | None = None
     source_name: str
     source_type: str
     status: str
-    total_messages: int | None
-    processed_messages: int
-    total_chunks: int
-    error_message: str | None
-    created_at: str
-    started_at: str | None
-    completed_at: str | None
+    total_messages: int | None = None
+    processed_messages: int = 0
+    total_chunks: int = 0
+    error_message: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
 
     class Config:
         from_attributes = True
@@ -131,61 +152,47 @@ class SearchRequest(BaseModel):
     source_ids: list[str] | None = None
     date_from: str | None = None
     date_to: str | None = None
-    min_reactions: int = 0
-    limit: int = Field(default=10, le=50)
+    min_reactions: int | None = None
+    limit: int = Field(default=5, ge=1, le=50)
 
 
 class SearchResultItem(BaseModel):
-    text: str
+    id: str
     score: float
-    source_name: str
-    author_name: str | None
-    date: str | None
-    reactions_count: int
-    views_count: int
-    message_url: str | None
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class SearchResponse(BaseModel):
+    query: str
     results: list[SearchResultItem]
     total: int
 
 
-class PopularPostItem(BaseModel):
-    text_preview: str
-    reactions_count: int
-    views_count: int
-    author_name: str | None
-    date: str
+class PopularResponse(BaseModel):
+    posts: list[dict[str, Any]]
 
 
-class AuthorStatsItem(BaseModel):
-    author_name: str
-    author_username: str | None
-    message_count: int
-    total_reactions: int
-    avg_reactions: float
+class AuthorsResponse(BaseModel):
+    authors: list[dict[str, Any]]
 
 
-class ActivityStatsResponse(BaseModel):
-    total_messages: int
-    active_days: int
-    avg_per_day: float
-    peak_day: str | None
-    peak_day_count: int
-    daily_breakdown: list[dict]
+class ActivityResponse(BaseModel):
+    total_messages: int = 0
+    total_sources: int = 0
+    by_hour: dict[str, int] = Field(default_factory=dict)
+    by_weekday: dict[str, int] = Field(default_factory=dict)
+    recent_daily: list[dict[str, Any]] = Field(default_factory=list)
 
 
-# ── Connect / Verify ─────────────────────────────────────────────────────────
+class FolderItem(BaseModel):
+    id: int
+    title: str
 
 
-@router.post("/connect", response_model=ConnectResponse)
-async def connect_telegram(
-    body: ConnectRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Initialize a Telegram session. Encrypts api_hash and stores in DB."""
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _get_fernet():
     from cryptography.fernet import Fernet
 
     encryption_key = settings.telegram_encryption_key
@@ -194,9 +201,85 @@ async def connect_telegram(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Telegram encryption not configured",
         )
+    return Fernet(encryption_key.encode())
 
-    fernet = Fernet(encryption_key.encode())
+
+def _source_to_dict(source: ExportSource) -> dict:
+    return {
+        "id": str(source.id),
+        "telegram_id": source.telegram_id,
+        "telegram_type": source.telegram_type.value,
+        "username": source.username,
+        "title": source.title,
+        "auto_export": source.auto_export,
+        "total_messages": source.total_messages,
+        "total_chunks": source.total_chunks,
+        "total_authors": source.total_authors,
+        "last_export_at": source.last_export_at.isoformat() if source.last_export_at else None,
+        "created_at": source.created_at.isoformat() if source.created_at else None,
+    }
+
+
+def _job_to_dict(job: ExportJob) -> dict:
+    return {
+        "id": str(job.id),
+        "source_id": str(job.source_id) if job.source_id else None,
+        "source_name": job.source_name,
+        "source_type": job.source_type.value,
+        "status": job.status.value,
+        "total_messages": job.total_messages,
+        "processed_messages": job.processed_messages,
+        "total_chunks": job.total_chunks,
+        "error_message": job.error_message,
+        "config": job.config or {},
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
+async def _get_active_session(user_id: uuid.UUID, db: AsyncSession) -> TelegramSession:
+    """Get the user's active Telegram session or raise 400."""
+    result = await db.execute(
+        select(TelegramSession).where(
+            TelegramSession.user_id == user_id,
+            TelegramSession.is_active.is_(True),
+        ).order_by(TelegramSession.created_at.desc())
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Telegram session. Use /connect first.",
+        )
+    return session
+
+
+# ── POST /connect — Init Telethon session ────────────────────────────────────
+
+
+@router.post("/connect", response_model=ConnectResponse)
+async def connect_telegram(
+    body: ConnectRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Initialize a Telegram session. Encrypts api_hash and stores in DB.
+
+    Sends a verification code to the user's phone via Telethon.
+    """
+    fernet = _get_fernet()
     encrypted_hash = fernet.encrypt(body.api_hash.encode()).decode()
+
+    # Deactivate any existing sessions
+    existing = await db.execute(
+        select(TelegramSession).where(
+            TelegramSession.user_id == user.id,
+            TelegramSession.is_active.is_(True),
+        )
+    )
+    for old_session in existing.scalars().all():
+        old_session.is_active = False
 
     session = TelegramSession(
         user_id=user.id,
@@ -207,7 +290,36 @@ async def connect_telegram(
     db.add(session)
     await db.flush()
 
+    # Send verification code via Telethon
+    try:
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+
+        client = TelegramClient(StringSession(), body.api_id, body.api_hash)
+        await client.connect()
+        sent_code = await client.send_code_request(body.phone)
+
+        # Store phone_code_hash temporarily (encrypted) for verify step
+        phone_code_hash = sent_code.phone_code_hash
+        session.session_string_encrypted = fernet.encrypt(
+            f"pending:{phone_code_hash}".encode()
+        ).decode()
+        await db.flush()
+
+        await client.disconnect()
+    except Exception as e:
+        logger.exception("Failed to send Telegram verification code")
+        await db.delete(session)
+        await db.flush()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to connect to Telegram: {str(e)[:200]}",
+        )
+
     return {"session_id": str(session.id), "status": "code_required"}
+
+
+# ── POST /verify — Verify code / 2FA ────────────────────────────────────────
 
 
 @router.post("/verify", response_model=VerifyResponse)
@@ -216,11 +328,10 @@ async def verify_telegram(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Verify Telegram code/2FA and save the session string."""
-    from cryptography.fernet import Fernet
-    from telethon import TelegramClient
-    from telethon.sessions import StringSession
+    """Verify the Telegram code (and optional 2FA password).
 
+    On success, stores the encrypted StringSession for future use.
+    """
     session_uuid = uuid.UUID(body.session_id)
     result = await db.execute(
         select(TelegramSession).where(
@@ -232,37 +343,74 @@ async def verify_telegram(
     if not tg_session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    encryption_key = settings.telegram_encryption_key
-    fernet = Fernet(encryption_key.encode())
+    fernet = _get_fernet()
     api_hash = fernet.decrypt(tg_session.api_hash_encrypted.encode()).decode()
 
+    # Decrypt pending phone_code_hash
+    pending_data = ""
+    if tg_session.session_string_encrypted:
+        pending_data = fernet.decrypt(tg_session.session_string_encrypted.encode()).decode()
+
+    phone_code_hash = pending_data.replace("pending:", "") if pending_data.startswith("pending:") else ""
+
     try:
+        from telethon import TelegramClient
+        from telethon.errors import SessionPasswordNeededError
+        from telethon.sessions import StringSession
+
         client = TelegramClient(StringSession(), tg_session.api_id, api_hash)
         await client.connect()
-        await client.sign_in(
-            phone=tg_session.phone,
-            code=body.code,
-            password=body.password_2fa,
-        )
 
-        # Save encrypted session string
+        if body.password_2fa:
+            # 2FA step
+            await client.sign_in(password=body.password_2fa)
+        else:
+            try:
+                await client.sign_in(
+                    phone=tg_session.phone,
+                    code=body.code,
+                    phone_code_hash=phone_code_hash,
+                )
+            except SessionPasswordNeededError:
+                await client.disconnect()
+                return {
+                    "status": "2fa_required",
+                    "requires_2fa": True,
+                    "message": "Two-factor authentication required",
+                }
+
+        # Save the authenticated session string (encrypted)
         session_string = client.session.save()
-        encrypted_session = fernet.encrypt(session_string.encode()).decode()
-        tg_session.session_string_encrypted = encrypted_session
+        tg_session.session_string_encrypted = fernet.encrypt(
+            session_string.encode()
+        ).decode()
         tg_session.is_active = True
+        tg_session.last_used_at = datetime.utcnow()
         await db.flush()
 
         await client.disconnect()
-        return {"status": "connected", "message": "Telegram аккаунт успешно подключён"}
 
+    except SessionPasswordNeededError:
+        return {
+            "status": "2fa_required",
+            "requires_2fa": True,
+            "message": "Two-factor authentication required",
+        }
     except Exception as e:
+        logger.exception("Failed to verify Telegram session")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Verification failed: {e!s}",
+            detail=f"Verification failed: {str(e)[:200]}",
         )
 
+    return {
+        "status": "connected",
+        "requires_2fa": False,
+        "message": "Telegram account connected successfully",
+    }
 
-# ── Sources ──────────────────────────────────────────────────────────────────
+
+# ── GET /sources — List export sources ───────────────────────────────────────
 
 
 @router.get("/sources", response_model=list[SourceResponse])
@@ -276,31 +424,24 @@ async def list_sources(
         .where(ExportSource.user_id == user.id)
         .order_by(ExportSource.created_at.desc())
     )
-    sources = result.scalars().all()
-    return [
-        {
-            "id": str(s.id),
-            "telegram_id": s.telegram_id,
-            "telegram_type": s.telegram_type.value,
-            "username": s.username,
-            "title": s.title,
-            "auto_export": s.auto_export,
-            "total_messages": s.total_messages,
-            "total_chunks": s.total_chunks,
-            "last_export_at": s.last_export_at.isoformat() if s.last_export_at else None,
-        }
-        for s in sources
-    ]
+    return [_source_to_dict(s) for s in result.scalars().all()]
 
 
-@router.post("/sources", response_model=SourceResponse, status_code=201)
+# ── POST /sources — Add export source ───────────────────────────────────────
+
+
+@router.post("/sources", response_model=SourceResponse, status_code=status.HTTP_201_CREATED)
 async def add_source(
     body: SourceCreateRequest,
     user: User = Depends(get_current_user),
     subscription: Subscription = Depends(get_active_subscription),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Register a new Telegram source for export."""
+    """Register a new Telegram source for export.
+
+    Resolves the username/ID via the user's connected Telethon session
+    to get the entity title and numeric Telegram ID.
+    """
     # Check plan limits
     count_result = await db.execute(
         select(func.count(ExportSource.id)).where(ExportSource.user_id == user.id)
@@ -314,43 +455,74 @@ async def add_source(
             detail=f"Source limit reached ({limit}). Upgrade plan for more.",
         )
 
-    # Parse telegram_id
+    # Get active Telegram session for entity resolution
+    tg_session = await _get_active_session(user.id, db)
+    fernet = _get_fernet()
+    api_hash = fernet.decrypt(tg_session.api_hash_encrypted.encode()).decode()
+    session_string_raw = fernet.decrypt(tg_session.session_string_encrypted.encode()).decode()
+
+    # Resolve entity via Telethon
     tg_input = body.telegram_id_or_username.lstrip("@")
     try:
-        tg_id = int(tg_input)
-    except ValueError:
-        tg_id = 0  # Will be resolved when export runs
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+
+        client = TelegramClient(StringSession(session_string_raw), tg_session.api_id, api_hash)
+        await client.connect()
+
+        identifier: int | str = tg_input
+        if tg_input.lstrip("-").isdigit():
+            identifier = int(tg_input)
+
+        entity = await client.get_entity(identifier)
+        telegram_id = entity.id
+        title = getattr(entity, "title", None) or getattr(entity, "first_name", "") or str(telegram_id)
+        username = getattr(entity, "username", None)
+
+        await client.disconnect()
+    except Exception as e:
+        logger.exception("Failed to resolve Telegram entity")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Could not find Telegram entity: {str(e)[:200]}",
+        )
+
+    # Check for duplicates
+    existing = await db.execute(
+        select(ExportSource).where(
+            ExportSource.user_id == user.id,
+            ExportSource.telegram_id == telegram_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This source is already added.",
+        )
 
     source = ExportSource(
         user_id=user.id,
-        telegram_id=tg_id,
-        telegram_type=body.source_type,
-        username=tg_input if not tg_input.isdigit() else None,
-        title=body.title or tg_input,
+        telegram_id=telegram_id,
+        telegram_type=body.type,
+        username=username,
+        title=body.title or title,
     )
     db.add(source)
     await db.flush()
 
-    return {
-        "id": str(source.id),
-        "telegram_id": source.telegram_id,
-        "telegram_type": source.telegram_type.value,
-        "username": source.username,
-        "title": source.title,
-        "auto_export": source.auto_export,
-        "total_messages": 0,
-        "total_chunks": 0,
-        "last_export_at": None,
-    }
+    return _source_to_dict(source)
 
 
-@router.delete("/sources/{source_id}", status_code=204)
+# ── DELETE /sources/{source_id} — Delete source + Qdrant data ────────────────
+
+
+@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_source(
     source_id: uuid.UUID,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete source and clean up Qdrant vectors."""
+    """Delete source and clean up associated Qdrant vectors and message metadata."""
     result = await db.execute(
         select(ExportSource).where(
             ExportSource.id == source_id,
@@ -361,31 +533,88 @@ async def delete_source(
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    # Clean up Qdrant vectors
-    from app.services.rag.ingestion import RAGIngestionPipeline
-    from app.services.vectordb.embeddings import EmbeddingService
-    from app.services.vectordb.qdrant_client import QdrantService
+    # Clean up Qdrant vectors for this source
+    try:
+        from app.services.vectordb.qdrant_client import QdrantService
 
-    rag = RAGIngestionPipeline(
-        embeddings=EmbeddingService(),
-        qdrant=QdrantService(collection="telegram_messages"),
-        db=db,
+        qdrant = QdrantService(collection=source.qdrant_collection)
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15) as http_client:
+            await http_client.post(
+                f"{qdrant.url}/collections/{qdrant.collection}/points/delete",
+                headers=qdrant._headers,
+                json={
+                    "filter": {
+                        "must": [
+                            {"key": "source_id", "match": {"value": str(source_id)}},
+                        ]
+                    }
+                },
+            )
+        logger.info("Deleted Qdrant points for source %s", source_id)
+    except Exception:
+        logger.exception("Failed to clean up Qdrant data for source %s", source_id)
+
+    # Delete associated message metadata
+    from sqlalchemy import delete
+
+    await db.execute(
+        delete(MessageMeta).where(MessageMeta.source_id == source_id)
     )
-    await rag.delete_by_source(str(user.id), str(source_id))
+
     await db.delete(source)
 
 
-# ── Jobs ─────────────────────────────────────────────────────────────────────
+# ── POST /jobs — Start export ────────────────────────────────────────────────
 
 
-@router.post("/jobs", response_model=JobResponse, status_code=201)
+@router.post("/jobs", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def start_export(
     body: JobCreateRequest,
     user: User = Depends(get_current_user),
     subscription: Subscription = Depends(get_active_subscription),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Start a new export job."""
+    """Start a new export job for the given source.
+
+    Validates plan limits, checks for running exports, and dispatches
+    the job to the Celery worker queue.
+    """
+    # Check weekly export limit
+    weekly_limit = EXPORT_WEEKLY_LIMITS.get(subscription.plan, 1)
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    count_result = await db.execute(
+        select(func.count(ExportJob.id)).where(
+            ExportJob.user_id == user.id,
+            ExportJob.created_at >= week_ago,
+        )
+    )
+    weekly_count = count_result.scalar() or 0
+    if weekly_count >= weekly_limit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Export limit reached ({weekly_limit}/week). Upgrade your plan.",
+        )
+
+    # Check for too many running exports
+    running_result = await db.execute(
+        select(func.count(ExportJob.id)).where(
+            ExportJob.user_id == user.id,
+            ExportJob.status.in_([
+                ExportJobStatus.PROCESSING,
+                ExportJobStatus.CHUNKING,
+                ExportJobStatus.EMBEDDING,
+            ]),
+        )
+    )
+    running_count = running_result.scalar() or 0
+    if running_count >= 3:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many running exports (max 3). Wait for completion.",
+        )
+
     source_uuid = uuid.UUID(body.source_id)
     result = await db.execute(
         select(ExportSource).where(
@@ -397,33 +626,8 @@ async def start_export(
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    # Check for already running exports
-    running_result = await db.execute(
-        select(func.count(ExportJob.id)).where(
-            ExportJob.user_id == user.id,
-            ExportJob.status.in_([ExportJobStatus.PROCESSING, ExportJobStatus.CHUNKING, ExportJobStatus.EMBEDDING]),
-        )
-    )
-    running_count = running_result.scalar() or 0
-    if running_count >= 3:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many running exports (max 3). Wait for completion.",
-        )
-
-    # Get user's Telegram session
-    session_result = await db.execute(
-        select(TelegramSession).where(
-            TelegramSession.user_id == user.id,
-            TelegramSession.is_active.is_(True),
-        ).order_by(TelegramSession.created_at.desc())
-    )
-    tg_session = session_result.scalar_one_or_none()
-    if not tg_session:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active Telegram session. Use /connect first.",
-        )
+    # Ensure user has a connected Telegram session
+    tg_session = await _get_active_session(user.id, db)
 
     job = ExportJob(
         user_id=user.id,
@@ -432,42 +636,49 @@ async def start_export(
         source_type=source.telegram_type,
         source_tg_id=source.username or str(source.telegram_id),
         source_name=source.title,
-        config={
-            "date_from": body.date_from,
-            "date_to": body.date_to,
-            "min_reactions": body.min_reactions,
-            "include_media": body.include_media,
-            "transcribe_voice": body.transcribe_voice,
-            "chunk_size": body.chunk_size,
-            "chunk_overlap": body.chunk_overlap,
-        },
+        config=body.config,
         status=ExportJobStatus.PENDING,
     )
     db.add(job)
     await db.flush()
 
-    # TODO: Dispatch Celery task for background processing
-    # from app.workers.export_tasks import run_export_job
-    # run_export_job.delay(str(job.id))
+    # Dispatch to Celery worker
+    try:
+        from app.workers.celery_app import celery_app
+
+        celery_app.send_task(
+            "app.workers.tasks.run_export",
+            kwargs={"job_id": str(job.id)},
+        )
+        logger.info("Dispatched export job %s to Celery", job.id)
+    except Exception:
+        logger.exception("Failed to dispatch export job %s to Celery", job.id)
 
     return _job_to_dict(job)
+
+
+# ── GET /jobs — List export jobs ─────────────────────────────────────────────
 
 
 @router.get("/jobs", response_model=list[JobResponse])
 async def list_jobs(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(default=20, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
 ) -> list[dict]:
     """List export jobs (history + active)."""
     result = await db.execute(
         select(ExportJob)
         .where(ExportJob.user_id == user.id)
         .order_by(ExportJob.created_at.desc())
+        .offset(offset)
         .limit(limit)
     )
-    jobs = result.scalars().all()
-    return [_job_to_dict(j) for j in jobs]
+    return [_job_to_dict(j) for j in result.scalars().all()]
+
+
+# ── GET /jobs/{job_id} — Get job details ─────────────────────────────────────
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
@@ -476,7 +687,7 @@ async def get_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Get export job details."""
+    """Get export job details + progress."""
     result = await db.execute(
         select(ExportJob).where(ExportJob.id == job_id, ExportJob.user_id == user.id)
     )
@@ -486,7 +697,10 @@ async def get_job(
     return _job_to_dict(job)
 
 
-@router.post("/jobs/{job_id}/cancel", status_code=200)
+# ── POST /jobs/{job_id}/cancel — Cancel export ──────────────────────────────
+
+
+@router.post("/jobs/{job_id}/cancel")
 async def cancel_job(
     job_id: uuid.UUID,
     user: User = Depends(get_current_user),
@@ -499,142 +713,349 @@ async def cancel_job(
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status in (ExportJobStatus.COMPLETED, ExportJobStatus.FAILED, ExportJobStatus.CANCELLED):
-        raise HTTPException(status_code=400, detail="Job already finished")
+
+    active_statuses = (
+        ExportJobStatus.PENDING,
+        ExportJobStatus.PROCESSING,
+        ExportJobStatus.CHUNKING,
+        ExportJobStatus.EMBEDDING,
+    )
+    if job.status not in active_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel job with status '{job.status.value}'",
+        )
 
     job.status = ExportJobStatus.CANCELLED
+    job.completed_at = datetime.utcnow()
     await db.flush()
-    return {"status": "cancelled"}
+
+    # Try to revoke Celery task
+    try:
+        from app.workers.celery_app import celery_app
+
+        celery_app.control.revoke(str(job.id), terminate=True)
+    except Exception:
+        logger.exception("Failed to revoke Celery task for job %s", job.id)
+
+    return _job_to_dict(job)
 
 
-# ── Search ───────────────────────────────────────────────────────────────────
+# ── POST /search — Semantic search ──────────────────────────────────────────
 
 
 @router.post("/search", response_model=SearchResponse)
 async def semantic_search(
     body: SearchRequest,
     user: User = Depends(get_current_user),
+    subscription: Subscription = Depends(get_active_subscription),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Semantic search over exported Telegram data via RAG."""
-    from app.services.rag.ingestion import RAGIngestionPipeline
-    from app.services.vectordb.embeddings import EmbeddingService
+    """Semantic search over exported Telegram data via RAG.
+
+    Embeds the query, then searches Qdrant with optional metadata filters
+    (source, date range, minimum reactions).
+    """
+    # Get user's sources for filtering
+    source_query = select(ExportSource).where(ExportSource.user_id == user.id)
+    if body.source_ids:
+        source_uuids = [uuid.UUID(sid) for sid in body.source_ids]
+        source_query = source_query.where(ExportSource.id.in_(source_uuids))
+    source_result = await db.execute(source_query)
+    sources = list(source_result.scalars().all())
+
+    if not sources:
+        return {"query": body.query, "results": [], "total": 0}
+
+    source_id_strs = [str(s.id) for s in sources]
+
+    # Build Qdrant filter
+    must_conditions: list[dict[str, Any]] = [
+        {"key": "source_id", "match": {"any": source_id_strs}},
+    ]
+    if body.date_from:
+        must_conditions.append({"key": "date", "range": {"gte": body.date_from}})
+    if body.date_to:
+        must_conditions.append({"key": "date", "range": {"lte": body.date_to}})
+    if body.min_reactions is not None:
+        must_conditions.append({"key": "reactions_count", "range": {"gte": body.min_reactions}})
+
+    # Generate embedding for the query
+    try:
+        from app.services.vectordb.embeddings import EmbeddingService
+
+        embedding_svc = EmbeddingService()
+        vectors = await embedding_svc.embed_texts([body.query])
+        query_vector = vectors[0] if vectors else []
+    except Exception:
+        logger.exception("Failed to generate query embedding")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate search embedding",
+        )
+
+    if not query_vector:
+        return {"query": body.query, "results": [], "total": 0}
+
+    # Search Qdrant
     from app.services.vectordb.qdrant_client import QdrantService
 
-    rag = RAGIngestionPipeline(
-        embeddings=EmbeddingService(),
-        qdrant=QdrantService(collection="telegram_messages"),
-        db=db,
-    )
-
-    date_from = datetime.fromisoformat(body.date_from) if body.date_from else None
-    date_to = datetime.fromisoformat(body.date_to) if body.date_to else None
-
-    results = await rag.search(
-        query=body.query,
-        user_id=str(user.id),
-        source_ids=body.source_ids,
-        date_from=date_from,
-        date_to=date_to,
-        min_reactions=body.min_reactions,
+    qdrant = QdrantService(collection="telegram_messages")
+    results = await qdrant.search(
+        vector=query_vector,
         limit=body.limit,
+        filter_conditions={"must": must_conditions},
     )
 
-    items = []
-    for r in results:
-        payload = r.get("payload", {})
-        items.append({
-            "text": payload.get("text", ""),
-            "score": r.get("score", 0),
-            "source_name": payload.get("source_name", ""),
-            "author_name": payload.get("author_name"),
-            "date": payload.get("date"),
-            "reactions_count": payload.get("reactions_count", 0),
-            "views_count": payload.get("views_count", 0),
-            "message_url": None,
-        })
+    hits = [
+        {
+            "id": r["id"],
+            "score": r["score"],
+            "payload": r.get("payload", {}),
+        }
+        for r in results
+    ]
 
-    return {"results": items, "total": len(items)}
+    return {"query": body.query, "results": hits, "total": len(hits)}
 
 
-# ── Analytics ────────────────────────────────────────────────────────────────
+# ── GET /analytics/popular — Popular posts ───────────────────────────────────
 
 
-@router.get("/analytics/popular", response_model=list[PopularPostItem])
-async def popular_posts(
-    source_id: uuid.UUID = Query(...),
-    min_reactions: int = Query(default=5),
-    limit: int = Query(default=50, le=100),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[dict]:
-    """Get popular posts by reaction count."""
-    # Verify ownership
-    src = await db.execute(
-        select(ExportSource).where(ExportSource.id == source_id, ExportSource.user_id == user.id)
-    )
-    if not src.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Source not found")
-
-    from app.services.export.analytics import ExportAnalytics
-
-    analytics = ExportAnalytics(db)
-    return await analytics.get_top_posts(source_id, limit=limit, min_reactions=min_reactions)
-
-
-@router.get("/analytics/authors", response_model=list[AuthorStatsItem])
-async def top_authors(
-    source_id: uuid.UUID = Query(...),
-    limit: int = Query(default=20, le=50),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[dict]:
-    """Get top authors by activity and engagement."""
-    src = await db.execute(
-        select(ExportSource).where(ExportSource.id == source_id, ExportSource.user_id == user.id)
-    )
-    if not src.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Source not found")
-
-    from app.services.export.analytics import ExportAnalytics
-
-    analytics = ExportAnalytics(db)
-    return await analytics.get_top_authors(source_id, limit=limit)
-
-
-@router.get("/analytics/activity", response_model=ActivityStatsResponse)
-async def activity_stats(
-    source_id: uuid.UUID = Query(...),
+@router.get("/analytics/popular", response_model=PopularResponse)
+async def analytics_popular(
+    source_id: str | None = Query(default=None),
+    min_reactions: int = Query(default=1, ge=0),
+    limit: int = Query(default=10, ge=1, le=50),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Get activity statistics by day."""
-    src = await db.execute(
-        select(ExportSource).where(ExportSource.id == source_id, ExportSource.user_id == user.id)
+    """Get the most popular messages sorted by reactions count."""
+    base_filter = [ExportSource.user_id == user.id]
+    if source_id:
+        base_filter.append(MessageMeta.source_id == uuid.UUID(source_id))
+
+    query = (
+        select(MessageMeta)
+        .join(ExportSource, MessageMeta.source_id == ExportSource.id)
+        .where(*base_filter, MessageMeta.reactions_count >= min_reactions)
+        .order_by(MessageMeta.reactions_count.desc())
+        .limit(limit)
     )
-    if not src.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Source not found")
+    result = await db.execute(query)
+    messages = result.scalars().all()
 
-    from app.services.export.analytics import ExportAnalytics
+    # Fetch source titles for display
+    source_ids = list({m.source_id for m in messages})
+    if source_ids:
+        sources_result = await db.execute(
+            select(ExportSource).where(ExportSource.id.in_(source_ids))
+        )
+        source_map = {s.id: s.title for s in sources_result.scalars().all()}
+    else:
+        source_map = {}
 
-    analytics = ExportAnalytics(db)
-    return await analytics.get_activity_stats(source_id)
+    posts = []
+    for msg in messages:
+        posts.append({
+            "id": str(msg.id),
+            "source_name": source_map.get(msg.source_id, "—"),
+            "author_name": msg.author_name or msg.author_username or "—",
+            "date": msg.date.isoformat() if msg.date else None,
+            "reactions_count": msg.reactions_count,
+            "views_count": msg.views_count,
+            "forwards_count": msg.forwards_count,
+            "replies_count": msg.replies_count,
+            "text_preview": "",
+            "has_media": msg.has_media,
+        })
+
+    return {"posts": posts}
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ── GET /analytics/authors — Top authors ─────────────────────────────────────
 
 
-def _job_to_dict(job: ExportJob) -> dict:
+@router.get("/analytics/authors", response_model=AuthorsResponse)
+async def analytics_authors(
+    source_id: str | None = Query(default=None),
+    export_job_id: str | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    user: User = Depends(get_current_user),
+    subscription: Subscription = Depends(get_active_subscription),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get top authors by message count with aggregate stats."""
+    base_filter = [
+        ExportSource.user_id == user.id,
+        MessageMeta.author_telegram_id.isnot(None),
+    ]
+    if source_id:
+        base_filter.append(MessageMeta.source_id == uuid.UUID(source_id))
+    if export_job_id:
+        base_filter.append(MessageMeta.export_job_id == uuid.UUID(export_job_id))
+
+    query = (
+        select(
+            MessageMeta.author_telegram_id,
+            MessageMeta.author_username,
+            MessageMeta.author_name,
+            func.count().label("message_count"),
+            func.avg(MessageMeta.reactions_count).label("avg_reactions"),
+            func.sum(MessageMeta.views_count).label("total_views"),
+        )
+        .join(ExportSource, MessageMeta.source_id == ExportSource.id)
+        .where(*base_filter)
+        .group_by(
+            MessageMeta.author_telegram_id,
+            MessageMeta.author_username,
+            MessageMeta.author_name,
+        )
+        .order_by(func.count().desc())
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    authors = []
+    for row in rows:
+        authors.append({
+            "author_telegram_id": row.author_telegram_id,
+            "author_username": row.author_username,
+            "author_name": row.author_name or "Неизвестный",
+            "message_count": row.message_count,
+            "avg_reactions": round(float(row.avg_reactions or 0), 2),
+            "total_views": int(row.total_views or 0),
+        })
+
+    return {"authors": authors}
+
+
+# ── GET /analytics/activity — Activity stats ─────────────────────────────────
+
+
+@router.get("/analytics/activity", response_model=ActivityResponse)
+async def analytics_activity(
+    source_id: str | None = Query(default=None),
+    export_job_id: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    subscription: Subscription = Depends(get_active_subscription),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get activity distribution by hour, weekday, and recent daily trend."""
+    base_filter = [ExportSource.user_id == user.id]
+    if source_id:
+        base_filter.append(MessageMeta.source_id == uuid.UUID(source_id))
+    if export_job_id:
+        base_filter.append(MessageMeta.export_job_id == uuid.UUID(export_job_id))
+
+    # Total messages
+    total_result = await db.execute(
+        select(func.count())
+        .select_from(MessageMeta)
+        .join(ExportSource, MessageMeta.source_id == ExportSource.id)
+        .where(*base_filter)
+    )
+    total_messages = total_result.scalar() or 0
+
+    # Total sources
+    sources_result = await db.execute(
+        select(func.count(func.distinct(ExportSource.id)))
+        .select_from(ExportSource)
+        .where(ExportSource.user_id == user.id)
+    )
+    total_sources = sources_result.scalar() or 0
+
+    # Activity by hour
+    hour_query = (
+        select(
+            func.extract("hour", MessageMeta.date).label("hour"),
+            func.count().label("count"),
+        )
+        .join(ExportSource, MessageMeta.source_id == ExportSource.id)
+        .where(*base_filter)
+        .group_by(func.extract("hour", MessageMeta.date))
+        .order_by(func.extract("hour", MessageMeta.date))
+    )
+    hour_result = await db.execute(hour_query)
+    by_hour = {str(int(row.hour)): row.count for row in hour_result.all()}
+
+    # Activity by weekday (0 = Sunday in PG extract(dow), adjust to 0 = Monday)
+    weekday_query = (
+        select(
+            func.extract("dow", MessageMeta.date).label("dow"),
+            func.count().label("count"),
+        )
+        .join(ExportSource, MessageMeta.source_id == ExportSource.id)
+        .where(*base_filter)
+        .group_by(func.extract("dow", MessageMeta.date))
+        .order_by(func.extract("dow", MessageMeta.date))
+    )
+    weekday_result = await db.execute(weekday_query)
+    by_weekday = {str(int(row.dow)): row.count for row in weekday_result.all()}
+
+    # Recent daily activity (last 14 days)
+    two_weeks_ago = datetime.utcnow() - timedelta(days=14)
+    daily_query = (
+        select(
+            func.date_trunc("day", MessageMeta.date).label("day"),
+            func.count().label("count"),
+        )
+        .join(ExportSource, MessageMeta.source_id == ExportSource.id)
+        .where(*base_filter, MessageMeta.date >= two_weeks_ago)
+        .group_by(func.date_trunc("day", MessageMeta.date))
+        .order_by(func.date_trunc("day", MessageMeta.date).desc())
+    )
+    daily_result = await db.execute(daily_query)
+    recent_daily = [
+        {"date": row.day.isoformat() if row.day else "", "count": row.count}
+        for row in daily_result.all()
+    ]
+
     return {
-        "id": str(job.id),
-        "source_name": job.source_name,
-        "source_type": job.source_type.value,
-        "status": job.status.value,
-        "total_messages": job.total_messages,
-        "processed_messages": job.processed_messages,
-        "total_chunks": job.total_chunks,
-        "error_message": job.error_message,
-        "created_at": job.created_at.isoformat(),
-        "started_at": job.started_at.isoformat() if job.started_at else None,
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "total_messages": total_messages,
+        "total_sources": total_sources,
+        "by_hour": by_hour,
+        "by_weekday": by_weekday,
+        "recent_daily": recent_daily,
     }
+
+
+# ── GET /folders — List Telegram folders ─────────────────────────────────────
+
+
+@router.get("/folders", response_model=list[FolderItem])
+async def list_folders(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """List Telegram dialog folders for the connected account."""
+    tg_session = await _get_active_session(user.id, db)
+    fernet = _get_fernet()
+
+    api_hash = fernet.decrypt(tg_session.api_hash_encrypted.encode()).decode()
+    session_string = fernet.decrypt(tg_session.session_string_encrypted.encode()).decode()
+
+    try:
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+        from telethon.tl.functions.messages import GetDialogFiltersRequest
+
+        client = TelegramClient(StringSession(session_string), tg_session.api_id, api_hash)
+        await client.connect()
+
+        result = await client(GetDialogFiltersRequest())
+        folders = []
+        for f in result:
+            if hasattr(f, "title") and hasattr(f, "id"):
+                folders.append({"id": f.id, "title": f.title})
+
+        await client.disconnect()
+        return folders
+    except Exception as e:
+        logger.exception("Failed to list Telegram folders")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to list folders: {str(e)[:200]}",
+        )
